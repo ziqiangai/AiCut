@@ -1,6 +1,14 @@
 # @aicut/vue
 
-Vue 3 wrapper around **[@aicut/core](https://www.npmjs.com/package/@aicut/core)** — a canvas-rendered video editor component. Import the core stylesheet once and use it like any other Vue SFC.
+> Vue 3 wrapper for the **AiCut** video editor — canvas timeline, custom toolbar slots, theming, i18n, drop-in `<VideoEditor>`.
+
+[![npm](https://img.shields.io/npm/v/@aicut/vue.svg)](https://www.npmjs.com/package/@aicut/vue)
+[![License](https://img.shields.io/npm/l/@aicut/vue.svg)](./LICENSE)
+[![GitHub](https://img.shields.io/badge/repo-ziqiangai/AiCut-181717?logo=github)](https://github.com/ziqiangai/AiCut)
+
+![AiCut editor](https://raw.githubusercontent.com/ziqiangai/AiCut/main/docs/screenshots/editor-dark.png)
+
+## Install
 
 ```bash
 pnpm add @aicut/vue @aicut/core
@@ -20,12 +28,14 @@ import "@aicut/core/styles.css";
 
 const project: Project = {
   version: 1,
-  sources: [{ id: "s1", url: "/media/a.mp4", kind: "video", name: "a.mp4" }],
-  tracks: [
-    { id: "t1", kind: "video", clips: [
-      { id: "c1", sourceId: "s1", in: 0, out: 5000, start: 0 },
-    ]},
+  sources: [
+    { id: "s1", url: "/media/a.mp4", kind: "video", name: "a.mp4" },
   ],
+  tracks: [{
+    id: "t1",
+    kind: "video",
+    clips: [{ id: "c1", sourceId: "s1", in: 0, out: 5000, start: 0 }],
+  }],
 };
 
 const editor = ref<{ api(): EditorApi | null } | null>(null);
@@ -53,29 +63,36 @@ async function doExport(p: Project) {
 </template>
 ```
 
-The component is **uncontrolled for project state**. Restore later with `editor.value?.api()?.setProject(saved)`.
+The component is **uncontrolled for project state**. Restore later with:
+
+```ts
+editor.value?.api()?.setProject(saved);
+```
 
 ## Props
 
-| Prop | Type | Notes |
-| --- | --- | --- |
-| `defaultProject` | `Project` | Initial project. Read once on mount. |
-| `theme` | `Theme` | CSS variable overrides. Reactive. |
-| `locale` | `Partial<Locale>` | UI strings. English by default; pass `localeZh` for Chinese. Reactive. |
+```ts
+interface VideoEditorProps {
+  defaultProject?: Project;
+  theme?: Theme;            // CSS-var overrides; reactive
+  locale?: Partial<Locale>; // EN default; pass localeZh for ZH; reactive
+}
+```
 
 ## Events
 
-| Event | Payload |
-| --- | --- |
-| `ready` | `(api: EditorApi)` |
-| `change` | `(project: Project)` |
-| `export` | `(project: Project)` — fired by `api.requestExport()` |
-| `time-update` | `(timeMs: number)` |
-| `play` / `pause` | `()` |
-| `selection-change` | `(clipId: string \| null)` |
-| `error` | `(error: Error)` |
+```ts
+ready              (api: EditorApi)
+change             (project: Project)
+export             (project: Project)        // fired by api.requestExport()
+time-update        (timeMs: number)
+play               ()
+pause              ()
+selection-change   (clipId: string | null)
+error              (error: Error)
+```
 
-The exposed `api()` returns the same `EditorApi` instance described in [`@aicut/core`](https://www.npmjs.com/package/@aicut/core) — `play`, `pause`, `seek`, `split`, `setProject`, `requestExport`, `setTheme`, `setLocale`, the lot.
+The exposed `api()` returns the full **`EditorApi`** described in [@aicut/core](https://www.npmjs.com/package/@aicut/core) — `play`, `pause`, `seek`, `split`, `setProject`, `requestExport`, `setTheme`, `setLocale`, and more.
 
 ## Theming
 
@@ -93,8 +110,6 @@ The exposed `api()` returns the same `EditorApi` instance described in [`@aicut/
 />
 ```
 
-The `theme` prop is reactive — swap the binding and the editor calls `setTheme` internally.
-
 ## i18n
 
 ```vue
@@ -103,13 +118,17 @@ import { ref, computed } from "vue";
 import { VideoEditor, localeEn, localeZh, type Locale } from "@aicut/vue";
 
 const lang = ref<"en" | "zh">("en");
-const locale = computed<Locale>(() => (lang.value === "zh" ? localeZh : localeEn));
+const locale = computed<Locale>(() =>
+  lang.value === "zh" ? localeZh : localeEn,
+);
 </script>
 
 <template>
   <VideoEditor :locale="locale" /* … */ />
 </template>
 ```
+
+`locale` swap re-titles the toolbar and re-paints canvas labels in place.
 
 ## Standalone `<Timeline>`
 
@@ -131,6 +150,6 @@ const picked = ref(0);
 </template>
 ```
 
-## License
+---
 
-MIT
+[Full docs & demo](https://github.com/ziqiangai/AiCut) · [@aicut/core](https://www.npmjs.com/package/@aicut/core) · [@aicut/react](https://www.npmjs.com/package/@aicut/react)

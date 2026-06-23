@@ -1,8 +1,41 @@
 {
   "name": "@aicut/core",
-  "version": "0.1.0",
-  "description": "Framework-agnostic core for the AiCut video editor — data model, editor instance, playback engine, vanilla DOM renderer.",
+  "version": "0.1.1",
+  "description": "Framework-agnostic core for the AiCut video editor — canvas timeline, data model, HTML5 playback engine.",
   "license": "MIT",
+  "author": "ziqiang <ziqiangytu@gmail.com>",
+  "homepage": "https://github.com/ziqiangai/AiCut#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ziqiangai/AiCut.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/ziqiangai/AiCut/issues"
+  },
+  "keywords": [
+    "video-editor",
+    "video-editing",
+    "timeline",
+    "timeline-editor",
+    "nle",
+    "video-cutter",
+    "video-clip",
+    "canvas",
+    "ffmpeg",
+    "video",
+    "editor",
+    "mp4",
+    "component",
+    "framework-agnostic",
+    "capcut",
+    "premiere",
+    "final-cut",
+    "davinci",
+    "imovie",
+    "veed",
+    "filmora"
+  ],
   "type": "module",
   "sideEffects": ["./styles/*.css"],
   "main": "./dist/index.cjs",

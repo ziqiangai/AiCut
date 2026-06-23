@@ -1,8 +1,16 @@
 # @aicut/core
 
-Framework-agnostic video editor engine. Owns the project data model, the HTML5 playback engine, the canvas timeline (ruler, tracks, clips, thumbnails, playhead, snap, in-canvas scrollbars), and a vanilla DOM toolbar.
+> Framework-agnostic engine for the AiCut video editor — canvas timeline, plain-JSON projects, zero runtime deps.
+
+[![npm](https://img.shields.io/npm/v/@aicut/core.svg)](https://www.npmjs.com/package/@aicut/core)
+[![License](https://img.shields.io/npm/l/@aicut/core.svg)](./LICENSE)
+[![GitHub](https://img.shields.io/badge/repo-ziqiangai/AiCut-181717?logo=github)](https://github.com/ziqiangai/AiCut)
+
+![AiCut editor](https://raw.githubusercontent.com/ziqiangai/AiCut/main/docs/screenshots/editor-dark.png)
 
 For React or Vue apps, prefer **[@aicut/react](https://www.npmjs.com/package/@aicut/react)** or **[@aicut/vue](https://www.npmjs.com/package/@aicut/vue)** — they wrap this same engine.
+
+## Install
 
 ```bash
 pnpm add @aicut/core
@@ -21,90 +29,78 @@ const editor = Editor.create({
     sources: [
       { id: "s1", url: "/media/a.mp4", kind: "video", name: "a.mp4" },
     ],
-    tracks: [
-      {
-        id: "t1",
-        kind: "video",
-        clips: [{ id: "c1", sourceId: "s1", in: 0, out: 5000, start: 0 }],
-      },
-    ],
+    tracks: [{
+      id: "t1",
+      kind: "video",
+      clips: [{ id: "c1", sourceId: "s1", in: 0, out: 5000, start: 0 }],
+    }],
   },
 });
 
-editor.on("change", ({ project }) => localStorage.setItem("aicut", JSON.stringify(project)));
-editor.on("export", ({ project }) => fetch("/api/export", {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ project }),
-}));
+editor.on("change", ({ project }) => {
+  localStorage.setItem("aicut", JSON.stringify(project));
+});
+
+editor.on("export", ({ project }) => {
+  fetch("/api/export", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ project }),
+  });
+});
 ```
 
-The editor renders into your `container`. Call methods on the returned `editor` instance to drive it imperatively.
-
-## API surface
-
-### Playback & editing
+## API at a glance
 
 ```ts
-editor.play(); editor.pause(); editor.togglePlay(); editor.seek(timeMs);
-editor.split();           // split at playhead
-editor.trimLeft();        // trim selected clip's left edge to playhead
+// Playback
+editor.play(); editor.pause(); editor.togglePlay();
+editor.seek(timeMs);
+
+// Editing
+editor.split();          // at playhead
+editor.trimLeft();
 editor.trimRight();
 editor.removeClip(clipId);
 editor.setClipSpeed(clipId, 2);
-
 editor.undo(); editor.redo();
-editor.canUndo(); editor.canRedo();
-```
 
-### Project, sources, tracks
-
-```ts
-editor.getProject();              // deep clone of current state
-editor.setProject(p);             // replace, preserves auto-fit etc.
-editor.reset();                   // empty single-track project
+// Project state
+editor.getProject();
+editor.setProject(project);
+editor.reset();
 editor.addSource({ id, url, kind: "video" });
 editor.addTrack("video");
-editor.removeTrack(trackId);
 editor.moveClip(clipId, { start, trackId, newTrack });
-editor.resizeClip(clipId, { in, out, start });
+
+// Viewport
+editor.setScale(80);     // px per second
+editor.setSnap(false);
+editor.setSelection(clipId);
+
+// UI
+editor.setTheme({ controlsBg: "#fff" });
+editor.setLocale({ undo: "Annuler" });
+editor.requestExport();  // → fires "export" event
 ```
 
-### Viewport
+## Events
 
 ```ts
-editor.getScale(); editor.setScale(80);    // px per second
-editor.getSnap(); editor.setSnap(false);
-editor.getSelection(); editor.setSelection(clipId);
-editor.enterFullscreen(); editor.exitFullscreen();
-```
-
-### Events
-
-```ts
-const off = editor.on("change", ({ project }) => /* … */);
-editor.on("time", ({ timeMs }) => /* playback tick */);
-editor.on("export", ({ project }) => /* host-triggered export */);
+editor.on("change",          ({ project }) => /* … */);
+editor.on("time",            ({ timeMs }) => /* … */);
+editor.on("export",          ({ project }) => /* … */);
 editor.on("selectionChange", ({ clipId }) => /* … */);
-editor.on("historyChange", ({ canUndo, canRedo }) => /* … */);
-editor.on("ready", ({ sourceId }) => /* per-source metadata loaded */);
-editor.on("scaleChange", ({ pxPerSec }) => /* … */);
-editor.on("snapChange", ({ snap }) => /* … */);
-editor.on("error", ({ error }) => /* … */);
-off();                                       // unsubscribe
+editor.on("historyChange",   ({ canUndo, canRedo }) => /* … */);
+editor.on("ready",           ({ sourceId }) => /* … */);
+editor.on("scaleChange",     ({ pxPerSec }) => /* … */);
+editor.on("snapChange",      ({ snap }) => /* … */);
+editor.on("error",           ({ error }) => /* … */);
 ```
 
-### Triggering export
-
-The library never calls a backend on its own — `requestExport()` fires the `export` event with the current project JSON; your handler decides what to do.
-
-```ts
-editor.requestExport();        // → emits "export" with project
-```
+Each `on` returns an unsubscribe function.
 
 ## Theming
-
-CSS variables; pass any subset via `theme` and the rest fall back to the defaults.
 
 ```ts
 Editor.create({
@@ -116,16 +112,14 @@ Editor.create({
     controlsBorder: "rgba(255, 255, 255, 0.08)",
     controlsHover: "rgba(255, 255, 255, 0.08)",
     controlsActive: "rgba(255, 255, 255, 0.12)",
-    previewBg: "#000",                          // letterbox colour
+    previewBg: "#000",                 // letterbox colour
   },
 });
-
-editor.setTheme({ controlsBg: "#f6f6f8", previewBg: "#e4e4e7" });   // runtime swap
 ```
 
-Every variable is also a plain CSS custom property — `.aicut-root { --aicut-controls-bg: …; }` works too.
+Every key is also a plain CSS custom property — `.aicut-root { --aicut-controls-bg: …; }` works too. Call `editor.setTheme(…)` to swap at runtime.
 
-## Internationalisation
+## i18n
 
 English by default. Bundled `localeZh` covers the whole editor (toolbar tooltips, exit-fullscreen overlay, canvas track headers).
 
@@ -134,41 +128,35 @@ import { Editor, localeZh } from "@aicut/core";
 
 Editor.create({ container, project, locale: localeZh });
 
-// Partial override + runtime swap
-editor.setLocale({ undo: "Annuler", redo: "Refaire" });
+editor.setLocale({ undo: "Annuler" });   // partial override
 ```
-
-`Locale` is exported as a type if you need to typecheck a custom pack.
 
 ## Toolbar slots
 
-Both the editor's built-in toolbar and the standalone `Timeline`'s optional toolbar reserve `toolbarLeft` / `toolbarRight` slot DOM elements for host-supplied controls.
+Both the editor's toolbar and the standalone `Timeline`'s optional toolbar expose `toolbarLeft` / `toolbarRight` slot DOM elements. The library renders nothing into them — append your own buttons.
 
 ```ts
-const editor = Editor.create({ container, project });
 const exportBtn = document.createElement("button");
 exportBtn.textContent = "Export";
 exportBtn.onclick = () => editor.requestExport();
 editor.toolbarRight.appendChild(exportBtn);
 ```
 
-The library paints nothing into either slot and renders no separator until they're populated.
-
 ## Standalone Timeline
-
-Use the canvas timeline without the rest of the editor — useful for a frame-picker, thumbnail strip, or a read-only preview.
 
 ```ts
 import { Timeline } from "@aicut/core";
 
 const tl = Timeline.create({
   container: document.getElementById("strip")!,
-  project: { /* one-clip project */ },
+  project: singleClipProject,
   showHeader: false,
   readOnly: true,
   onSeek: (ms) => console.log("picked", ms),
 });
 ```
+
+Useful for a frame-picker, thumbnail strip, or read-only preview.
 
 ## Data model
 
@@ -188,14 +176,14 @@ interface Track { id: string; kind: "video" | "audio"; clips: Clip[]; }
 
 interface Clip {
   id: string; sourceId: string;
-  in: Ms; out: Ms;       // window into the source (exclusive at `out`)
-  start: Ms;              // position on the timeline
+  in: Ms; out: Ms;     // window into the source (exclusive at `out`)
+  start: Ms;            // position on the timeline
   speed?: number;
 }
 
-type Ms = number;         // integer milliseconds; no frame-rate coupling
+type Ms = number;       // integer milliseconds; no frame-rate coupling
 ```
 
-## License
+---
 
-MIT
+[Full docs & demo](https://github.com/ziqiangai/AiCut) · [@aicut/react](https://www.npmjs.com/package/@aicut/react) · [@aicut/vue](https://www.npmjs.com/package/@aicut/vue)

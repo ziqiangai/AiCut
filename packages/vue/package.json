@@ -1,8 +1,42 @@
 {
   "name": "@aicut/vue",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Vue 3 wrapper for the AiCut video editor — thin declarative shell over @aicut/core.",
   "license": "MIT",
+  "author": "ziqiang <ziqiangytu@gmail.com>",
+  "homepage": "https://github.com/ziqiangai/AiCut#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ziqiangai/AiCut.git",
+    "directory": "packages/vue"
+  },
+  "bugs": {
+    "url": "https://github.com/ziqiangai/AiCut/issues"
+  },
+  "keywords": [
+    "video-editor",
+    "video-editing",
+    "vue",
+    "vue3",
+    "vue-component",
+    "timeline",
+    "timeline-editor",
+    "nle",
+    "video-cutter",
+    "video-clip",
+    "canvas",
+    "video",
+    "editor",
+    "mp4",
+    "component",
+    "capcut",
+    "premiere",
+    "final-cut",
+    "davinci",
+    "imovie",
+    "veed",
+    "filmora"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

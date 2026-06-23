@@ -1,6 +1,14 @@
 # @aicut/react
 
-React 18 / 19 wrapper around **[@aicut/core](https://www.npmjs.com/package/@aicut/core)** — a canvas-rendered video editor component you can drop into any host app. Import the core stylesheet once and you're done.
+> React wrapper for the **AiCut** video editor — canvas timeline, custom toolbar slots, theming, i18n, drop-in `<VideoEditor>`.
+
+[![npm](https://img.shields.io/npm/v/@aicut/react.svg)](https://www.npmjs.com/package/@aicut/react)
+[![License](https://img.shields.io/npm/l/@aicut/react.svg)](./LICENSE)
+[![GitHub](https://img.shields.io/badge/repo-ziqiangai/AiCut-181717?logo=github)](https://github.com/ziqiangai/AiCut)
+
+![AiCut editor](https://raw.githubusercontent.com/ziqiangai/AiCut/main/docs/screenshots/editor-dark.png)
+
+## Install
 
 ```bash
 pnpm add @aicut/react @aicut/core
@@ -19,12 +27,14 @@ import "@aicut/core/styles.css";
 
 const project: Project = {
   version: 1,
-  sources: [{ id: "s1", url: "/media/a.mp4", kind: "video", name: "a.mp4" }],
-  tracks: [
-    { id: "t1", kind: "video", clips: [
-      { id: "c1", sourceId: "s1", in: 0, out: 5000, start: 0 },
-    ]},
+  sources: [
+    { id: "s1", url: "/media/a.mp4", kind: "video", name: "a.mp4" },
   ],
+  tracks: [{
+    id: "t1",
+    kind: "video",
+    clips: [{ id: "c1", sourceId: "s1", in: 0, out: 5000, start: 0 }],
+  }],
 };
 
 export function Editor() {
@@ -44,32 +54,45 @@ export function Editor() {
 }
 ```
 
-The component is **uncontrolled for project state** — the editor owns the current project. To restore from JSON later, `apiRef.current?.setProject(saved)`.
+The component is **uncontrolled for project state** — the editor owns the current project. To restore from JSON later:
+
+```ts
+apiRef.current?.setProject(savedJson);
+```
 
 ## Props
 
-| Prop | Type | Notes |
-| --- | --- | --- |
-| `defaultProject` | `Project` | Initial project. Read once on mount. |
-| `theme` | `Theme` | CSS variable overrides. Reactive — mirrors to `editor.setTheme`. |
-| `locale` | `Partial<Locale>` | UI strings. English by default; pass `localeZh` for Chinese. Reactive. |
-| `toolbarLeft` | `ReactNode` | Portaled into the editor toolbar's left bookend slot. |
-| `toolbarRight` | `ReactNode` | Portaled into the right slot — host's Export button lives here. |
-| `apiRef` | `Ref<VideoEditorApi \| null>` | Imperative API handle. |
-| `onReady` | `(api) => void` | Fires synchronously on mount. |
-| `onChange` | `(project) => void` | Any model mutation. |
-| `onExport` | `(project) => void` | Fired by `api.requestExport()`. |
-| `onTimeUpdate` | `(ms) => void` | Playback tick. |
-| `onPlay` / `onPause` | `() => void` | |
-| `onSelectionChange` | `(clipId \| null) => void` | |
-| `onError` | `(err) => void` | |
-| `className` / `style` | `string` / `CSSProperties` | Forwarded to the host `<div>`. |
+```ts
+interface VideoEditorProps {
+  defaultProject?: Project;
 
-The `apiRef` value implements **every method on `EditorApi`** — `play`, `pause`, `seek`, `split`, `trimLeft`, `trimRight`, `setProject`, `getProject`, `addSource`, `addTrack`, `removeClip`, `setSelection`, `undo`, `redo`, `setTheme`, `setLocale`, `requestExport`, etc. See [`@aicut/core`](https://www.npmjs.com/package/@aicut/core) for the full surface.
+  theme?: Theme;                         // CSS-var overrides; reactive
+  locale?: Partial<Locale>;              // EN default; pass localeZh for ZH
+
+  toolbarLeft?: ReactNode;               // host controls — left bookend
+  toolbarRight?: ReactNode;              //                 right bookend
+
+  apiRef?: Ref<VideoEditorApi | null>;
+
+  onReady?: (api: VideoEditorApi) => void;
+  onChange?: (project: Project) => void;
+  onExport?: (project: Project) => void; // fired by api.requestExport()
+  onTimeUpdate?: (ms: number) => void;
+  onPlay?: () => void;
+  onPause?: () => void;
+  onSelectionChange?: (clipId: string | null) => void;
+  onError?: (err: Error) => void;
+
+  className?: string;
+  style?: CSSProperties;
+}
+```
+
+The `apiRef` value exposes the full **`EditorApi`** — `play`, `pause`, `seek`, `split`, `trimLeft`, `trimRight`, `setProject`, `getProject`, `addSource`, `addTrack`, `removeClip`, `undo`, `redo`, `setTheme`, `setLocale`, `requestExport`, and more. See [@aicut/core](https://www.npmjs.com/package/@aicut/core) for the complete surface.
 
 ## Custom toolbar controls
 
-Drop any React node into `toolbarLeft` / `toolbarRight`. The library renders nothing into the slots and hides the separator until they're populated.
+The editor's top toolbar reserves bookend slots for any React node. The library hides the visual separator until you put something in them.
 
 ```tsx
 <VideoEditor
@@ -88,7 +111,7 @@ Drop any React node into `toolbarLeft` / `toolbarRight`. The library renders not
 />
 ```
 
-`api.requestExport()` fires the `export` event with the current project JSON, which flows back through your `onExport` prop. From there, POST it to your own backend.
+`api.requestExport()` fires the `export` event with the current project JSON, which flows back through your `onExport` prop. Your handler decides whether to POST to a backend, download locally, etc.
 
 ## Theming
 
@@ -100,7 +123,7 @@ Drop any React node into `toolbarLeft` / `toolbarRight`. The library renders not
     controlsBorder: "rgba(0, 0, 0, 0.08)",
     controlsHover: "rgba(0, 0, 0, 0.06)",
     controlsActive: "rgba(0, 0, 0, 0.08)",
-    previewBg: "#e4e4e7",     // letterbox colour around the video
+    previewBg: "#e4e4e7",      // letterbox colour around the video
   }}
   /* … */
 />
@@ -110,18 +133,21 @@ The `theme` prop is reactive — swap it any time and the editor calls `setTheme
 
 ## i18n
 
-English is default. Pass the bundled `localeZh` for Chinese, or a partial object to override specific keys.
-
 ```tsx
 import { VideoEditor, localeZh } from "@aicut/react";
 
+// Whole-locale swap
 <VideoEditor locale={localeZh} /* … */ />
+
+// Partial override
 <VideoEditor locale={{ undo: "Annuler" }} /* … */ />
 ```
 
+`locale` is reactive too — runtime swap re-titles the toolbar and re-paints canvas labels in place.
+
 ## Standalone `<Timeline>`
 
-Use the canvas timeline without the rest of the editor.
+Use the canvas timeline without the rest of the editor — frame-pickers, thumbnail strips, read-only previews.
 
 ```tsx
 import { Timeline, type TimelineApi } from "@aicut/react";
@@ -138,6 +164,6 @@ import { Timeline, type TimelineApi } from "@aicut/react";
 />
 ```
 
-## License
+---
 
-MIT
+[Full docs & demo](https://github.com/ziqiangai/AiCut) · [@aicut/core](https://www.npmjs.com/package/@aicut/core) · [@aicut/vue](https://www.npmjs.com/package/@aicut/vue)
