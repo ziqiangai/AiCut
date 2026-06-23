@@ -16,7 +16,8 @@
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r exec rm -rf dist node_modules .turbo && rm -rf node_modules",
     "changeset": "changeset",
-    "release": "pnpm build && changeset publish"
+    "release": "pnpm build && changeset publish",
+    "publish:npm": "./scripts/publish.sh"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.9",
