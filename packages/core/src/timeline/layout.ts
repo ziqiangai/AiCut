@@ -9,9 +9,37 @@ export const CLIP_INSET = 6;
 export const SCALE_MIN = 10;
 export const SCALE_MAX = 400;
 
+/** Scrollbar geometry. */
+export const SCROLLBAR_THICKNESS = 10;
+/** Minimum thumb length so it stays grabbable at large content sizes. */
+export const SCROLLBAR_MIN_THUMB = 24;
+/** Gutter inset from the canvas edges so the bar doesn't clip. */
+export const SCROLLBAR_INSET = 2;
+
 /** Total height = ruler + sum of tracks. Caller decides if it wants more. */
 export function totalHeight(tracks: Track[]): number {
   return RULER_HEIGHT + tracks.length * TRACK_HEIGHT;
+}
+
+/**
+ * Track-stack content height — what the scrollbars compare against
+ * the visible track region. Includes one extra TRACK_HEIGHT when a
+ * drag is in flight so the "+ 新轨道" phantom row is reachable.
+ */
+export function contentHeight(tracks: Track[], isDragging: boolean): number {
+  return tracks.length * TRACK_HEIGHT + (isDragging ? TRACK_HEIGHT : 0);
+}
+
+/** Pixels of timeline content along the X axis at the given zoom. */
+export function contentWidth(project: Project, pxPerSec: number): number {
+  let max = 0;
+  for (const t of project.tracks) {
+    for (const c of t.clips) {
+      const end = c.start + (c.out - c.in);
+      if (end > max) max = end;
+    }
+  }
+  return (max / 1000) * pxPerSec;
 }
 
 /** Top-edge y for a track at `index`. */
@@ -19,10 +47,16 @@ export function trackY(index: number): number {
   return RULER_HEIGHT + index * TRACK_HEIGHT;
 }
 
-/** Inverse of trackY — which track index (or -1) does a given y fall in. */
-export function trackIndexAt(y: number, trackCount: number): number {
+/** Inverse of trackY — which track index (or -1) does a given y fall in.
+ *  `scrollTop` shifts the visible window down; pass 0 if not scrolling. */
+export function trackIndexAt(
+  y: number,
+  trackCount: number,
+  scrollTop = 0,
+): number {
   if (y < RULER_HEIGHT) return -1;
-  const idx = Math.floor((y - RULER_HEIGHT) / TRACK_HEIGHT);
+  const contentY = y - RULER_HEIGHT + scrollTop;
+  const idx = Math.floor(contentY / TRACK_HEIGHT);
   if (idx < 0 || idx >= trackCount) return -1;
   return idx;
 }

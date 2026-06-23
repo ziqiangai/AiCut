@@ -10,11 +10,16 @@ import { hitTest, type HitTarget } from "./hit.js";
 import {
   HEADER_WIDTH,
   RULER_HEIGHT,
+  SCROLLBAR_INSET,
+  SCROLLBAR_MIN_THUMB,
+  SCROLLBAR_THICKNESS,
   TRACK_HEIGHT,
   clampScale,
+  contentHeight,
+  contentWidth,
   findClip,
   snapTargets,
-  totalHeight,
+  trackIndexAt,
   wouldOverlap,
   xToMs,
 } from "./layout.js";
@@ -99,6 +104,8 @@ type DragCtx = DragMove | DragTrim | DragScrub;
 const SNAP_PX = 8;
 const DEFAULT_SCALE = 80;
 const WHEEL_ZOOM_RATE = 0.012;
+const SCROLLBAR_FADE_HOLD_MS = 800;
+const SCROLLBAR_FADE_OUT_MS = 400;
 
 /**
  * Canvas-rendered, framework-free timeline. Owns ruler, multi-track
@@ -124,8 +131,25 @@ export class Timeline {
   private autoFitEnabled: boolean;
 
   private scrollLeft = 0;
+  private scrollTop = 0;
   private viewportWidth = 0;
   private viewportHeight = 0;
+  /**
+   * `Date.now()` of the last interaction with each scrollbar (scroll
+   * change OR hover OR drag). Drives the macOS-style fade — bars are
+   * fully opaque for SCROLLBAR_FADE_HOLD_MS after activity, then ease
+   * out over the next SCROLLBAR_FADE_OUT_MS.
+   */
+  private lastScrollInteractY = 0;
+  private lastScrollInteractX = 0;
+  private hoverScrollbarY = false;
+  private hoverScrollbarX = false;
+  /** When set, pointer is dragging a scrollbar thumb. */
+  private scrollbarDrag: {
+    axis: "v" | "h";
+    pointerStart: number;
+    scrollStart: number;
+  } | null = null;
   private hoveredClipId: string | null = null;
   private hoveredTrackIndex: number | null = null;
   private hoverCursor: string = "default";
@@ -144,6 +168,14 @@ export class Timeline {
     ghostTrackIndex: number;
     wouldOverlap: boolean;
   } | null = null;
+  /**
+   * Most recent local pointer coords during a move drag — used by the
+   * edge-autoscroll loop to re-run drop-target resolution between
+   * pointermove events while scrollTop ticks under a stationary cursor.
+   */
+  private lastDragPointerX = 0;
+  private lastDragPointerY = 0;
+  private dragScrollRafPending = false;
   private rafPending = false;
   private hasAutoFitted = false;
   private resizeObs: ResizeObserver | null = null;
@@ -353,14 +385,13 @@ export class Timeline {
   private resizeCanvas(): void {
     const rect = this.root.getBoundingClientRect();
     this.viewportWidth = Math.max(1, Math.floor(rect.width));
-    // Content-driven height: ruler + N tracks + one extra row reserved
-    // for the "+ new track" phantom that appears during drag. Always
-    // sized for it so the canvas doesn't grow/shrink mid-drag (which
-    // would invalidate hit-test coords).
-    const desired = totalHeight(this.project.tracks) + TRACK_HEIGHT;
+    // Canvas is now strictly viewport-sized. Track overflow is handled
+    // by internal scrollTop + the in-canvas scrollbar — host CSS sets
+    // the container's height and we just fill it. Previously we grew
+    // the canvas with the track count, which conflicted with scroll.
     this.viewportHeight = Math.max(
-      Math.floor(rect.height) || RULER_HEIGHT + TRACK_HEIGHT,
-      desired,
+      Math.floor(rect.height) || RULER_HEIGHT + TRACK_HEIGHT + SCROLLBAR_THICKNESS,
+      RULER_HEIGHT + TRACK_HEIGHT + SCROLLBAR_THICKNESS,
     );
     const dpr = window.devicePixelRatio || 1;
     this.canvas.width = Math.floor(this.viewportWidth * dpr);
@@ -378,14 +409,52 @@ export class Timeline {
   }
 
   private maxScrollLeft(): number {
-    const dur = projectDuration(this.project);
     const baseX = this.showHeader ? HEADER_WIDTH : 0;
-    const contentW = (dur / 1000) * this.pxPerSec;
-    return Math.max(0, contentW - (this.viewportWidth - baseX) + 24);
+    const visibleW = this.viewportWidth - baseX - SCROLLBAR_THICKNESS;
+    const cw = contentWidth(this.project, this.pxPerSec);
+    return Math.max(0, cw - visibleW + 24);
+  }
+
+  private maxScrollTop(): number {
+    const visibleH =
+      this.viewportHeight - RULER_HEIGHT - SCROLLBAR_THICKNESS;
+    const ch = contentHeight(this.project.tracks, this.drag?.kind === "move");
+    return Math.max(0, ch - visibleH);
   }
 
   private clampScroll(): void {
     this.scrollLeft = Math.max(0, Math.min(this.scrollLeft, this.maxScrollLeft()));
+    this.scrollTop = Math.max(0, Math.min(this.scrollTop, this.maxScrollTop()));
+  }
+
+  /**
+   * Scrollbar opacity = full for SCROLLBAR_FADE_HOLD_MS after last
+   * interaction, then linearly fades to 0 over SCROLLBAR_FADE_OUT_MS.
+   * Hovering or actively dragging the bar pins opacity at 1. Returns
+   * 0 if the bar isn't needed (content fits).
+   */
+  private scrollbarOpacity(axis: "v" | "h"): number {
+    if (axis === "v" && this.maxScrollTop() <= 0) return 0;
+    if (axis === "h" && this.maxScrollLeft() <= 0) return 0;
+    if (
+      (axis === "v" && (this.hoverScrollbarY || this.scrollbarDrag?.axis === "v")) ||
+      (axis === "h" && (this.hoverScrollbarX || this.scrollbarDrag?.axis === "h"))
+    ) {
+      return 1;
+    }
+    const last = axis === "v" ? this.lastScrollInteractY : this.lastScrollInteractX;
+    const elapsed = Date.now() - last;
+    if (elapsed < SCROLLBAR_FADE_HOLD_MS) return 1;
+    const fade = elapsed - SCROLLBAR_FADE_HOLD_MS;
+    if (fade >= SCROLLBAR_FADE_OUT_MS) return 0;
+    return 1 - fade / SCROLLBAR_FADE_OUT_MS;
+  }
+
+  /** Mark a scrollbar axis as just-touched so its fade timer restarts. */
+  private touchScrollbar(axis: "v" | "h"): void {
+    if (axis === "v") this.lastScrollInteractY = Date.now();
+    else this.lastScrollInteractX = Date.now();
+    this.scheduleRender();
   }
 
   // ---- rendering ------------------------------------------------------
@@ -406,7 +475,31 @@ export class Timeline {
         this.thumbs,
       );
       this.canvas.style.cursor = this.hoverCursor;
+      this.maybeContinueFade();
     });
+  }
+
+  /**
+   * Keep the raf loop alive while a scrollbar is still in its HOLD or
+   * fade-out window. Without this, opacity is sampled once and the
+   * bar would freeze at whatever value it had at the last input event
+   * instead of smoothly fading out. Skipped when a bar is pinned
+   * (hover or active drag) since opacity is constant there.
+   */
+  private maybeContinueFade(): void {
+    const total = SCROLLBAR_FADE_HOLD_MS + SCROLLBAR_FADE_OUT_MS;
+    const now = Date.now();
+    const needV =
+      this.maxScrollTop() > 0 &&
+      !this.hoverScrollbarY &&
+      this.scrollbarDrag?.axis !== "v" &&
+      now - this.lastScrollInteractY < total;
+    const needH =
+      this.maxScrollLeft() > 0 &&
+      !this.hoverScrollbarX &&
+      this.scrollbarDrag?.axis !== "h" &&
+      now - this.lastScrollInteractX < total;
+    if (needV || needH) this.scheduleRender();
   }
 
   private maybeAutoFit(): void {
@@ -426,6 +519,7 @@ export class Timeline {
       project: this.project,
       pxPerSec: this.pxPerSec,
       scrollLeft: this.scrollLeft,
+      scrollTop: this.scrollTop,
       timeMs: this.timeMs,
       selectedClipId: this.selectedClipId,
       hoveredClipId: this.hoveredClipId,
@@ -437,6 +531,10 @@ export class Timeline {
       viewportWidth: this.viewportWidth,
       viewportHeight: this.viewportHeight,
       dragGhost: this.dragGhost,
+      scrollbarOpacityY: this.scrollbarOpacity("v"),
+      scrollbarOpacityX: this.scrollbarOpacity("h"),
+      scrollbarActiveY: this.scrollbarDrag?.axis === "v",
+      scrollbarActiveX: this.scrollbarDrag?.axis === "h",
     };
   }
 
@@ -469,9 +567,11 @@ export class Timeline {
     this.canvas.addEventListener("pointerup", (e) => this.onPointerUp(e));
     this.canvas.addEventListener("pointercancel", (e) => this.onPointerUp(e));
     this.canvas.addEventListener("pointerleave", () => {
-      if (!this.drag) {
+      if (!this.drag && !this.scrollbarDrag) {
         this.hoveredClipId = null;
         this.hoverCursor = "default";
+        this.hoverScrollbarY = false;
+        this.hoverScrollbarX = false;
         this.scheduleRender();
       }
     });
@@ -481,6 +581,48 @@ export class Timeline {
     const { x, y } = this.localCoords(e);
     const target = this.hitTarget(x, y);
     this.canvas.setPointerCapture(e.pointerId);
+
+    // Scrollbar hits are handled BEFORE readOnly / other targets so the
+    // bar works as a regular scroll affordance even in frame-picker mode.
+    if (target.kind === "scrollbar-thumb-v") {
+      this.scrollbarDrag = {
+        axis: "v",
+        pointerStart: y,
+        scrollStart: this.scrollTop,
+      };
+      this.touchScrollbar("v");
+      return;
+    }
+    if (target.kind === "scrollbar-thumb-h") {
+      this.scrollbarDrag = {
+        axis: "h",
+        pointerStart: x,
+        scrollStart: this.scrollLeft,
+      };
+      this.touchScrollbar("h");
+      return;
+    }
+    if (target.kind === "scrollbar-track-v") {
+      const page = Math.max(
+        TRACK_HEIGHT,
+        this.viewportHeight - RULER_HEIGHT - SCROLLBAR_THICKNESS,
+      );
+      this.scrollTop += target.before ? -page : page;
+      this.clampScroll();
+      this.touchScrollbar("v");
+      return;
+    }
+    if (target.kind === "scrollbar-track-h") {
+      const baseX = this.showHeader ? HEADER_WIDTH : 0;
+      const page = Math.max(
+        80,
+        this.viewportWidth - baseX - SCROLLBAR_THICKNESS,
+      );
+      this.scrollLeft += target.before ? -page : page;
+      this.clampScroll();
+      this.touchScrollbar("h");
+      return;
+    }
 
     // Read-only mode (e.g. frame-picker) — every click in the track
     // area becomes a seek. Drag = scrub. No selection / move / trim.
@@ -581,12 +723,58 @@ export class Timeline {
   private onPointerMove(e: PointerEvent): void {
     const { x, y } = this.localCoords(e);
 
+    // Scrollbar thumb drag has priority — pointer delta along the bar's
+    // axis maps to a scroll delta scaled by (maxScroll / freeTrackLen).
+    // freeTrackLen is the gutter length minus the thumb length, i.e.
+    // how far the thumb can actually travel.
+    if (this.scrollbarDrag) {
+      if (this.scrollbarDrag.axis === "v") {
+        const visibleH =
+          this.viewportHeight - RULER_HEIGHT - SCROLLBAR_THICKNESS;
+        const contentH = contentHeight(
+          this.project.tracks,
+          this.drag?.kind === "move",
+        );
+        const trackLen = visibleH - SCROLLBAR_INSET * 2;
+        const thumbLen = Math.max(
+          SCROLLBAR_MIN_THUMB,
+          trackLen * (visibleH / contentH),
+        );
+        const maxScroll = Math.max(0, contentH - visibleH);
+        const free = Math.max(1, trackLen - thumbLen);
+        const ratio = maxScroll / free;
+        this.scrollTop =
+          this.scrollbarDrag.scrollStart +
+          (y - this.scrollbarDrag.pointerStart) * ratio;
+      } else {
+        const baseX = this.showHeader ? HEADER_WIDTH : 0;
+        const visibleW = this.viewportWidth - baseX - SCROLLBAR_THICKNESS;
+        const contentW = contentWidth(this.project, this.pxPerSec);
+        const trackLen = visibleW - SCROLLBAR_INSET * 2;
+        const thumbLen = Math.max(
+          SCROLLBAR_MIN_THUMB,
+          trackLen * (visibleW / contentW),
+        );
+        const maxScroll = Math.max(0, contentW - visibleW);
+        const free = Math.max(1, trackLen - thumbLen);
+        const ratio = maxScroll / free;
+        this.scrollLeft =
+          this.scrollbarDrag.scrollStart +
+          (x - this.scrollbarDrag.pointerStart) * ratio;
+      }
+      this.clampScroll();
+      this.touchScrollbar(this.scrollbarDrag.axis);
+      return;
+    }
+
     if (!this.drag) {
       // Hover-only — update cursor + hoveredClipId + hoveredTrackIndex.
       const target = this.hitTarget(x, y);
       let nextHover: string | null = null;
       let nextHoverTrack: number | null = null;
       let cursor = "default";
+      let onScrollbarV = false;
+      let onScrollbarH = false;
       if (target.kind === "clip") {
         nextHover = target.clipId;
         nextHoverTrack = target.trackIndex;
@@ -609,15 +797,33 @@ export class Timeline {
       } else if (target.kind === "header-delete") {
         nextHoverTrack = target.trackIndex;
         cursor = "pointer";
+      } else if (
+        target.kind === "scrollbar-thumb-v" ||
+        target.kind === "scrollbar-track-v"
+      ) {
+        onScrollbarV = true;
+        cursor = "default";
+      } else if (
+        target.kind === "scrollbar-thumb-h" ||
+        target.kind === "scrollbar-track-h"
+      ) {
+        onScrollbarH = true;
+        cursor = "default";
       }
+      const hoverChanged =
+        onScrollbarV !== this.hoverScrollbarY ||
+        onScrollbarH !== this.hoverScrollbarX;
       if (
         nextHover !== this.hoveredClipId ||
         nextHoverTrack !== this.hoveredTrackIndex ||
-        cursor !== this.hoverCursor
+        cursor !== this.hoverCursor ||
+        hoverChanged
       ) {
         this.hoveredClipId = nextHover;
         this.hoveredTrackIndex = nextHoverTrack;
         this.hoverCursor = cursor;
+        this.hoverScrollbarY = onScrollbarV;
+        this.hoverScrollbarX = onScrollbarH;
         this.scheduleRender();
       }
       return;
@@ -635,54 +841,11 @@ export class Timeline {
     }
 
     if (this.drag.kind === "move") {
-      const dxPx = x - this.drag.pointerStartX;
-      const dxMs = (dxPx / this.pxPerSec) * 1000;
-      let nextStart = Math.max(0, this.drag.originalStart + dxMs);
-      nextStart = this.applySnap(nextStart, this.drag.clipId);
-      // Row under cursor — Y maps to existing track index, or to the
-      // phantom "+ new track" row sitting one slot below the last
-      // track (so users can intentionally drop into it).
-      const tiRaw = this.trackIndexAtY(y);
-      const phantomIdx = this.project.tracks.length;
-      const phantomY = RULER_HEIGHT + phantomIdx * TRACK_HEIGHT;
-      const onPhantom = y >= phantomY && y < phantomY + TRACK_HEIGHT;
-      const intendedTrackIndex = onPhantom
-        ? phantomIdx
-        : tiRaw >= 0
-          ? tiRaw
-          : this.drag.trackIndex;
-
-      // Defer to host's smart routing when not on phantom row.
-      let ghostTrackIndex = intendedTrackIndex;
-      let overlap = false;
-      if (onPhantom) {
-        ghostTrackIndex = phantomIdx;
-        overlap = true; // visually treat as "new track" via warning ghost
-      } else if (this.opts.resolveDrop) {
-        const r = this.opts.resolveDrop(this.drag.clipId, {
-          start: nextStart,
-          intendedTrackIndex,
-        });
-        ghostTrackIndex = r.trackIndex;
-        overlap = r.wouldCreateNew;
-      } else {
-        const found = findClip(this.project, this.drag.clipId);
-        const dur = found ? found.clip.out - found.clip.in : 0;
-        const targetTrack = this.project.tracks[intendedTrackIndex];
-        overlap = targetTrack
-          ? wouldOverlap(targetTrack, this.drag.clipId, nextStart, nextStart + dur)
-          : false;
-      }
-
-      this.dragGhost = {
-        clipId: this.drag.clipId,
-        ghostStart: nextStart,
-        ghostTrackIndex,
-        wouldOverlap: overlap,
-      };
-      this.dropTargetTrackIndex =
-        ghostTrackIndex !== this.drag.trackIndex ? ghostTrackIndex : null;
+      this.lastDragPointerX = x;
+      this.lastDragPointerY = y;
+      this.processMoveDrag(x, y);
       this.scheduleRender();
+      this.maybeStartDragAutoScroll();
       return;
     }
 
@@ -717,7 +880,124 @@ export class Timeline {
     }
   }
 
+  /**
+   * Update dragGhost + dropTargetTrackIndex for the in-flight move
+   * drag, given the current viewport pointer position. Pulled out of
+   * onPointerMove so the edge-autoscroll loop can re-run it on each
+   * tick — autoscroll moves scrollTop under a stationary cursor, and
+   * the ghost must follow the new row under that cursor.
+   */
+  private processMoveDrag(x: number, y: number): void {
+    if (!this.drag || this.drag.kind !== "move") return;
+    const drag = this.drag;
+    const dxPx = x - drag.pointerStartX;
+    const dxMs = (dxPx / this.pxPerSec) * 1000;
+    let nextStart = Math.max(0, drag.originalStart + dxMs);
+    nextStart = this.applySnap(nextStart, drag.clipId);
+
+    const tiRaw = this.trackIndexAtY(y);
+    const phantomIdx = this.project.tracks.length;
+    const phantomScreenY =
+      RULER_HEIGHT + phantomIdx * TRACK_HEIGHT - this.scrollTop;
+    const onPhantom =
+      y >= phantomScreenY && y < phantomScreenY + TRACK_HEIGHT;
+    const intendedTrackIndex = onPhantom
+      ? phantomIdx
+      : tiRaw >= 0
+        ? tiRaw
+        : drag.trackIndex;
+
+    let ghostTrackIndex = intendedTrackIndex;
+    let overlap = false;
+    if (onPhantom) {
+      ghostTrackIndex = phantomIdx;
+      overlap = true;
+    } else if (this.opts.resolveDrop) {
+      const r = this.opts.resolveDrop(drag.clipId, {
+        start: nextStart,
+        intendedTrackIndex,
+      });
+      ghostTrackIndex = r.trackIndex;
+      overlap = r.wouldCreateNew;
+    } else {
+      const found = findClip(this.project, drag.clipId);
+      const dur = found ? found.clip.out - found.clip.in : 0;
+      const targetTrack = this.project.tracks[intendedTrackIndex];
+      overlap = targetTrack
+        ? wouldOverlap(targetTrack, drag.clipId, nextStart, nextStart + dur)
+        : false;
+    }
+
+    this.dragGhost = {
+      clipId: drag.clipId,
+      ghostStart: nextStart,
+      ghostTrackIndex,
+      wouldOverlap: overlap,
+    };
+    this.dropTargetTrackIndex =
+      ghostTrackIndex !== drag.trackIndex ? ghostTrackIndex : null;
+  }
+
+  /**
+   * Px-per-frame scroll speed when the pointer is in a vertical edge
+   * zone of the track region. Returns 0 outside the zone. Speed ramps
+   * linearly from 0 at the zone's inner edge to ~16 px/frame at the
+   * outer edge, so brushing the edge gives a gentle nudge and parking
+   * deep at it gives a brisk auto-scroll.
+   */
+  private dragScrollSpeedY(): number {
+    if (!this.drag || this.drag.kind !== "move") return 0;
+    const y = this.lastDragPointerY;
+    const top = RULER_HEIGHT;
+    const bottom = this.viewportHeight - SCROLLBAR_THICKNESS;
+    const zone = 36;
+    const maxSpeed = 16;
+    if (y >= top && y < top + zone) {
+      // Top zone — scroll up (decrease scrollTop), but only if there's
+      // somewhere to go (otherwise the loop would tick forever).
+      if (this.scrollTop <= 0) return 0;
+      const depth = (top + zone - y) / zone;
+      return -Math.max(2, maxSpeed * depth);
+    }
+    if (y <= bottom && y > bottom - zone) {
+      if (this.scrollTop >= this.maxScrollTop()) return 0;
+      const depth = (y - (bottom - zone)) / zone;
+      return Math.max(2, maxSpeed * depth);
+    }
+    return 0;
+  }
+
+  /**
+   * Drive vertical auto-scroll while the user holds a clip near the
+   * top/bottom edge of the track area. Self-stopping — exits the loop
+   * once the pointer leaves the zone, the drag ends, or scroll bottoms
+   * out at the clamp.
+   */
+  private maybeStartDragAutoScroll(): void {
+    if (this.dragScrollRafPending) return;
+    if (this.dragScrollSpeedY() === 0) return;
+    this.dragScrollRafPending = true;
+    requestAnimationFrame(() => {
+      this.dragScrollRafPending = false;
+      if (this.destroyed) return;
+      const speed = this.dragScrollSpeedY();
+      if (speed === 0 || !this.drag || this.drag.kind !== "move") return;
+      this.scrollTop += speed;
+      this.clampScroll();
+      this.touchScrollbar("v");
+      this.processMoveDrag(this.lastDragPointerX, this.lastDragPointerY);
+      this.scheduleRender();
+      this.maybeStartDragAutoScroll();
+    });
+  }
+
   private onPointerUp(_e: PointerEvent): void {
+    if (this.scrollbarDrag) {
+      const axis = this.scrollbarDrag.axis;
+      this.scrollbarDrag = null;
+      this.touchScrollbar(axis);
+      return;
+    }
     if (!this.drag) return;
     const drag = this.drag;
     const ghost = this.dragGhost;
@@ -784,18 +1064,36 @@ export class Timeline {
           this.scrollLeft =
             (anchorMs / 1000) * this.pxPerSec - (cursorX - baseX);
           this.clampScroll();
+          this.touchScrollbar("h");
           this.opts.onScaleChange?.(this.pxPerSec);
           this.scheduleRender();
           return;
         }
-        // Pan — trackpad horizontal swipe (deltaX) and regular wheel
-        // (deltaY) both move the timeline horizontally. Vertical
-        // scrolling is intentionally suppressed; tracks fit vertically.
-        const dx = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-        if (dx === 0) return;
+        // Pan. Trackpad horizontal swipe (|deltaX|>|deltaY|) → X axis.
+        // Otherwise vertical wheel/swipe → Y axis when tracks overflow,
+        // falling through to X when there's no Y to scroll (preserves
+        // the single-track UX where a mouse wheel pans horizontally).
+        const horizDominant = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+        if (horizDominant) {
+          if (e.deltaX === 0) return;
+          e.preventDefault();
+          this.scrollLeft += e.deltaX;
+          this.clampScroll();
+          this.touchScrollbar("h");
+          this.scheduleRender();
+          return;
+        }
+        if (e.deltaY === 0) return;
         e.preventDefault();
-        this.scrollLeft += dx;
-        this.clampScroll();
+        if (this.maxScrollTop() > 0) {
+          this.scrollTop += e.deltaY;
+          this.clampScroll();
+          this.touchScrollbar("v");
+        } else {
+          this.scrollLeft += e.deltaY;
+          this.clampScroll();
+          this.touchScrollbar("h");
+        }
         this.scheduleRender();
       },
       { passive: false },
@@ -830,16 +1128,16 @@ export class Timeline {
       project: this.project,
       pxPerSec: this.pxPerSec,
       scrollLeft: this.scrollLeft,
+      scrollTop: this.scrollTop,
       showHeader: this.showHeader,
       viewportWidth: this.viewportWidth,
+      viewportHeight: this.viewportHeight,
+      isDragging: this.drag?.kind === "move",
     });
   }
 
   private trackIndexAtY(y: number): number {
-    if (y < RULER_HEIGHT) return -1;
-    const idx = Math.floor((y - RULER_HEIGHT) / TRACK_HEIGHT);
-    if (idx < 0 || idx >= this.project.tracks.length) return -1;
-    return idx;
+    return trackIndexAt(y, this.project.tracks.length, this.scrollTop);
   }
 
   private applySnap(ms: Ms, ignoreClipId: string | null): Ms {

@@ -5,10 +5,14 @@ import {
   CLIP_INSET,
   HEADER_WIDTH,
   RULER_HEIGHT,
+  SCROLLBAR_INSET,
+  SCROLLBAR_MIN_THUMB,
+  SCROLLBAR_THICKNESS,
   TRACK_HEIGHT,
+  contentHeight,
+  contentWidth,
   formatRulerLabel,
   niceTickSeconds,
-  totalHeight,
   trackY,
   uncoveredIntervals,
 } from "./layout.js";
@@ -31,6 +35,7 @@ export interface DrawState {
   project: Project;
   pxPerSec: number;
   scrollLeft: number;
+  scrollTop: number;
   timeMs: number;
   selectedClipId: string | null;
   hoveredClipId: string | null;
@@ -43,6 +48,12 @@ export interface DrawState {
   showHeader: boolean;
   viewportWidth: number;
   viewportHeight: number;
+  /** 0–1 fade opacity for each scrollbar. 0 hides it entirely. */
+  scrollbarOpacityY: number;
+  scrollbarOpacityX: number;
+  /** Active = currently being dragged → render at full opacity + emphasized. */
+  scrollbarActiveY: boolean;
+  scrollbarActiveX: boolean;
   /**
    * In-flight drag preview. While set, the clip with `clipId` is
    * drawn faded at its real position AND a fully-opaque "ghost" of it
@@ -59,8 +70,17 @@ export interface DrawState {
 
 /**
  * Paint the entire timeline. Stateless — given the same DrawState
- * twice you get the same pixels. Order matters: background → ruler →
- * tracks → clips (with thumbnails) → headers → snap guide → playhead.
+ * twice you get the same pixels.
+ *
+ * Layout has FOUR regions with different sticky behavior:
+ *   - Ruler band  (top, scrolls X only)
+ *   - Headers col (left, scrolls Y only — when showHeader)
+ *   - Tracks      (the main grid, scrolls both)
+ *   - Scrollbars  (edge overlays, never scroll)
+ *
+ * We render in passes; each pass `clip`s to its region and (where
+ * needed) translates by `-scrollTop` so paint functions can keep
+ * working in their natural untranslated coordinates.
  */
 export function drawAll(
   ctx: CanvasRenderingContext2D,
@@ -72,25 +92,62 @@ export function drawAll(
   ctx.fillStyle = style.bg;
   ctx.fillRect(0, 0, W, H);
 
-  drawRuler(ctx, state, style);
+  const baseX = state.showHeader ? HEADER_WIDTH : 0;
+  const trackAreaW = W - baseX - SCROLLBAR_THICKNESS;
+  const trackAreaH = H - RULER_HEIGHT - SCROLLBAR_THICKNESS;
+
+  // --- Pass 1: Track grid (scrolls X + Y) -----------------------------
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(baseX, RULER_HEIGHT, trackAreaW, trackAreaH);
+  ctx.clip();
+  ctx.translate(0, -state.scrollTop);
   drawTracks(ctx, state, style, thumbs);
-  drawCoverageGaps(ctx, state, style);
-  // Phantom "+ new track" row is always present during a drag so the
-  // user can choose to create a track at will (not only when forced
-  // by overlap). Painted before the ghost so the ghost sits on top.
   if (state.isDragging) {
-    drawPhantomRow(
-      ctx,
-      state.project.tracks.length,
-      state.showHeader ? HEADER_WIDTH : 0,
-      state,
-      style,
-    );
+    drawPhantomRow(ctx, state.project.tracks.length, baseX, state, style);
   }
   if (state.dragGhost) drawDragGhost(ctx, state, style, thumbs);
-  if (state.showHeader) drawHeaders(ctx, state, style);
+  ctx.restore();
+
+  // --- Pass 2: Coverage-gap warning columns (scrolls X, full height) ---
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(baseX, 0, trackAreaW, H - SCROLLBAR_THICKNESS);
+  ctx.clip();
+  drawCoverageGaps(ctx, state, style);
+  ctx.restore();
+
+  // --- Pass 3: Headers column (sticky X, scrolls Y) -------------------
+  if (state.showHeader) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, RULER_HEIGHT, HEADER_WIDTH, trackAreaH);
+    ctx.clip();
+    ctx.translate(0, -state.scrollTop);
+    drawHeaders(ctx, state, style);
+    ctx.restore();
+  }
+
+  // --- Pass 4: Ruler (sticky Y, scrolls X) ----------------------------
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(baseX, 0, trackAreaW, RULER_HEIGHT);
+  ctx.clip();
+  drawRuler(ctx, state, style);
+  ctx.restore();
+
+  // --- Pass 5: Snap guide + playhead (scroll X, full visible track Y) -
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(baseX, 0, trackAreaW, H - SCROLLBAR_THICKNESS);
+  ctx.clip();
   drawSnapGuide(ctx, state, style);
   drawPlayhead(ctx, state, style);
+  ctx.restore();
+
+  // --- Pass 6: Scrollbars (no clip — overlay at edges) ---------------
+  drawScrollbarV(ctx, state, style);
+  drawScrollbarH(ctx, state, style);
 }
 
 /**
@@ -109,7 +166,11 @@ function drawCoverageGaps(
   const gaps = uncoveredIntervals(state.project);
   if (gaps.length === 0) return;
   const baseX = state.showHeader ? HEADER_WIDTH : 0;
-  const trackStackH = totalHeight(state.project.tracks) - RULER_HEIGHT;
+  // Span the visible track area, not the (potentially huge) total —
+  // pre-clipped by drawAll's pass-2 region anyway, but explicit
+  // height keeps the hatch math clean.
+  const trackStackH =
+    state.viewportHeight - RULER_HEIGHT - SCROLLBAR_THICKNESS;
   for (const [s, e] of gaps) {
     const x1 = Math.max(
       baseX,
@@ -618,6 +679,120 @@ function drawSnapGuide(
 }
 
 // ---- utilities ------------------------------------------------------------
+
+// ---- scrollbars -----------------------------------------------------------
+
+/**
+ * Right-edge vertical scrollbar. Opacity is host-controlled (set by
+ * Timeline based on time-since-interaction + hover). Thumb position
+ * and length derive from scrollTop / contentHeight / visibleHeight.
+ */
+function drawScrollbarV(
+  ctx: CanvasRenderingContext2D,
+  state: DrawState,
+  style: DrawStyle,
+): void {
+  if (state.scrollbarOpacityY <= 0.01) return;
+  const visibleH = state.viewportHeight - RULER_HEIGHT - SCROLLBAR_THICKNESS;
+  const contentH = contentHeight(state.project.tracks, state.isDragging);
+  if (contentH <= visibleH) return;
+  const trackX = state.viewportWidth - SCROLLBAR_THICKNESS + SCROLLBAR_INSET;
+  const trackY0 = RULER_HEIGHT + SCROLLBAR_INSET;
+  const trackLen = visibleH - SCROLLBAR_INSET * 2;
+  const thumbLen = Math.max(
+    SCROLLBAR_MIN_THUMB,
+    trackLen * (visibleH / contentH),
+  );
+  const maxScroll = contentH - visibleH;
+  const thumbY =
+    trackY0 + (maxScroll > 0 ? (state.scrollTop / maxScroll) * (trackLen - thumbLen) : 0);
+  paintScrollbar(
+    ctx,
+    style,
+    trackX,
+    trackY0,
+    SCROLLBAR_THICKNESS - SCROLLBAR_INSET * 2,
+    trackLen,
+    thumbY - trackY0,
+    thumbLen,
+    state.scrollbarOpacityY,
+    state.scrollbarActiveY,
+    "v",
+  );
+}
+
+function drawScrollbarH(
+  ctx: CanvasRenderingContext2D,
+  state: DrawState,
+  style: DrawStyle,
+): void {
+  if (state.scrollbarOpacityX <= 0.01) return;
+  const baseX = state.showHeader ? HEADER_WIDTH : 0;
+  const visibleW = state.viewportWidth - baseX - SCROLLBAR_THICKNESS;
+  const contentW = contentWidth(state.project, state.pxPerSec);
+  if (contentW <= visibleW) return;
+  const trackY0 = state.viewportHeight - SCROLLBAR_THICKNESS + SCROLLBAR_INSET;
+  const trackX0 = baseX + SCROLLBAR_INSET;
+  const trackLen = visibleW - SCROLLBAR_INSET * 2;
+  const thumbLen = Math.max(
+    SCROLLBAR_MIN_THUMB,
+    trackLen * (visibleW / contentW),
+  );
+  const maxScroll = contentW - visibleW;
+  const thumbX =
+    trackX0 + (maxScroll > 0 ? (state.scrollLeft / maxScroll) * (trackLen - thumbLen) : 0);
+  paintScrollbar(
+    ctx,
+    style,
+    trackX0,
+    trackY0,
+    trackLen,
+    SCROLLBAR_THICKNESS - SCROLLBAR_INSET * 2,
+    thumbX - trackX0,
+    thumbLen,
+    state.scrollbarOpacityX,
+    state.scrollbarActiveX,
+    "h",
+  );
+}
+
+/**
+ * Common drawing for both scrollbars. The thumb fades with `opacity`;
+ * `active` (dragging) emphasizes via thicker stroke. Gutter is a
+ * subtle background — visible to suggest "you can grab here" but
+ * never loud enough to fight clip content.
+ */
+function paintScrollbar(
+  ctx: CanvasRenderingContext2D,
+  style: DrawStyle,
+  trackX: number,
+  trackY0: number,
+  trackW: number,
+  trackH: number,
+  thumbOffset: number,
+  thumbLen: number,
+  opacity: number,
+  active: boolean,
+  axis: "h" | "v",
+): void {
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  // Gutter — barely visible track lane.
+  ctx.fillStyle = withAlpha(style.text, 0.06);
+  roundRect(ctx, trackX, trackY0, trackW, trackH, Math.min(trackW, trackH) / 2);
+  ctx.fill();
+  // Thumb — neutral by default, info-tinted when actively dragged.
+  ctx.fillStyle = active
+    ? withAlpha(style.info, 0.85)
+    : withAlpha(style.text, 0.4);
+  if (axis === "v") {
+    roundRect(ctx, trackX, trackY0 + thumbOffset, trackW, thumbLen, trackW / 2);
+  } else {
+    roundRect(ctx, trackX + thumbOffset, trackY0, thumbLen, trackH, trackH / 2);
+  }
+  ctx.fill();
+  ctx.restore();
+}
 
 function roundRect(
   ctx: CanvasRenderingContext2D,

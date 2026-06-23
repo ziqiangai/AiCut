@@ -3,6 +3,11 @@ import {
   HANDLE_PX,
   HEADER_WIDTH,
   RULER_HEIGHT,
+  SCROLLBAR_INSET,
+  SCROLLBAR_MIN_THUMB,
+  SCROLLBAR_THICKNESS,
+  contentHeight,
+  contentWidth,
   trackIndexAt,
   trackY,
   xToMs,
@@ -17,14 +22,24 @@ export type HitTarget =
   | { kind: "clip-handle-left"; trackIndex: number; clipId: string }
   | { kind: "clip-handle-right"; trackIndex: number; clipId: string }
   | { kind: "phantom-new-track" }
+  /** Drag the thumb itself — caller stores pointerStart + scrollStart. */
+  | { kind: "scrollbar-thumb-v"; thumbY: number; thumbLen: number }
+  | { kind: "scrollbar-thumb-h"; thumbX: number; thumbLen: number }
+  /** Click the gutter (anywhere on the bar that isn't the thumb) →
+   *  page-jump by one viewport in the direction of the click. */
+  | { kind: "scrollbar-track-v"; before: boolean }
+  | { kind: "scrollbar-track-h"; before: boolean }
   | { kind: "outside" };
 
 export interface HitContext {
   project: Project;
   pxPerSec: number;
   scrollLeft: number;
+  scrollTop: number;
   showHeader: boolean;
   viewportWidth: number;
+  viewportHeight: number;
+  isDragging: boolean;
 }
 
 /**
@@ -39,18 +54,75 @@ export interface HitContext {
 export function hitTest(x: number, y: number, ctx: HitContext): HitTarget {
   if (y < 0 || x < 0) return { kind: "outside" };
 
+  // ---- Scrollbars first ----------------------------------------------
+  // The bars overlay everything else, so a click on the thumb must NEVER
+  // fall through to "select clip" / "seek". Check them before any other
+  // region resolves.
+  const baseX = ctx.showHeader ? HEADER_WIDTH : 0;
+  const visibleH = ctx.viewportHeight - RULER_HEIGHT - SCROLLBAR_THICKNESS;
+  const contentH = contentHeight(ctx.project.tracks, ctx.isDragging);
+  // Vertical bar
+  if (
+    contentH > visibleH &&
+    x >= ctx.viewportWidth - SCROLLBAR_THICKNESS &&
+    x < ctx.viewportWidth &&
+    y >= RULER_HEIGHT &&
+    y < ctx.viewportHeight - SCROLLBAR_THICKNESS
+  ) {
+    const trackLen = visibleH - SCROLLBAR_INSET * 2;
+    const thumbLen = Math.max(
+      SCROLLBAR_MIN_THUMB,
+      trackLen * (visibleH / contentH),
+    );
+    const maxScroll = contentH - visibleH;
+    const thumbY =
+      RULER_HEIGHT +
+      SCROLLBAR_INSET +
+      (maxScroll > 0 ? (ctx.scrollTop / maxScroll) * (trackLen - thumbLen) : 0);
+    if (y >= thumbY && y <= thumbY + thumbLen) {
+      return { kind: "scrollbar-thumb-v", thumbY, thumbLen };
+    }
+    return { kind: "scrollbar-track-v", before: y < thumbY };
+  }
+  // Horizontal bar
+  const visibleW = ctx.viewportWidth - baseX - SCROLLBAR_THICKNESS;
+  const contentW = contentWidth(ctx.project, ctx.pxPerSec);
+  if (
+    contentW > visibleW &&
+    y >= ctx.viewportHeight - SCROLLBAR_THICKNESS &&
+    y < ctx.viewportHeight &&
+    x >= baseX &&
+    x < ctx.viewportWidth - SCROLLBAR_THICKNESS
+  ) {
+    const trackLen = visibleW - SCROLLBAR_INSET * 2;
+    const thumbLen = Math.max(
+      SCROLLBAR_MIN_THUMB,
+      trackLen * (visibleW / contentW),
+    );
+    const maxScroll = contentW - visibleW;
+    const thumbX =
+      baseX +
+      SCROLLBAR_INSET +
+      (maxScroll > 0
+        ? (ctx.scrollLeft / maxScroll) * (trackLen - thumbLen)
+        : 0);
+    if (x >= thumbX && x <= thumbX + thumbLen) {
+      return { kind: "scrollbar-thumb-h", thumbX, thumbLen };
+    }
+    return { kind: "scrollbar-track-h", before: x < thumbX };
+  }
+
   if (ctx.showHeader && x < HEADER_WIDTH && y >= RULER_HEIGHT) {
-    const ti = trackIndexAt(y, ctx.project.tracks.length);
+    const ti = trackIndexAt(y, ctx.project.tracks.length, ctx.scrollTop);
     if (ti >= 0) {
-      // Delete-track button — only active when the track is empty.
-      // Non-empty tracks must be cleared (clip-by-clip) first; this
-      // prevents the one-click "I just lost an hour of editing" foot-
-      // gun while still letting users tidy up stray empty rows.
       const track = ctx.project.tracks[ti]!;
       if (track.clips.length === 0) {
         const btnSize = 18;
         const btnLeft = HEADER_WIDTH - btnSize - 6;
-        const btnTop = RULER_HEIGHT + ti * 56 + (56 - btnSize) / 2;
+        // Header rows are translated by -scrollTop when painted, so
+        // their visible top in viewport coords is `trackY(i) - scrollTop`.
+        const btnTop =
+          RULER_HEIGHT + ti * 56 + (56 - btnSize) / 2 - ctx.scrollTop;
         if (
           x >= btnLeft &&
           x <= btnLeft + btnSize &&
@@ -67,7 +139,7 @@ export function hitTest(x: number, y: number, ctx: HitContext): HitTarget {
 
   if (y < RULER_HEIGHT) return { kind: "ruler" };
 
-  const ti = trackIndexAt(y, ctx.project.tracks.length);
+  const ti = trackIndexAt(y, ctx.project.tracks.length, ctx.scrollTop);
   if (ti < 0) return { kind: "outside" };
   const track = ctx.project.tracks[ti]!;
   const ms = xToMs(x, ctx.pxPerSec, ctx.scrollLeft, ctx.showHeader);
