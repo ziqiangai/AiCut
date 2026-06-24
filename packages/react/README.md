@@ -75,6 +75,17 @@ interface VideoEditorProps {
   toolbarLeft?: ReactNode;               // host controls — left bookend
   toolbarRight?: ReactNode;              //                 right bookend
 
+  playbackEngine?: PlaybackEngineFactory; // pluggable playback; default
+                                           //   HtmlVideoEngine. Bound at
+                                           //   mount — change + remount
+                                           //   via `key` to re-apply.
+  timelineHeight?: number;               // outer height of the bottom
+                                           //   timeline area (default 240).
+                                           //   Reactive; no remount needed.
+  trackHeight?: number;                  // per-row height (default 56).
+                                           //   Initial-only; process-wide.
+  rulerHeight?: number;                  // time-label strip (default 24).
+
   apiRef?: Ref<VideoEditorApi | null>;
 
   onReady?: (api: VideoEditorApi) => void;
@@ -162,6 +173,24 @@ import { VideoEditor, localeZh } from "@aicut/react";
 ```
 
 `locale` is reactive too — runtime swap re-titles the toolbar and re-paints canvas labels in place.
+
+## Compact viewports
+
+Default chrome is sized for desktop. For laptop side panels or embedded editors, shrink the bottom area to reclaim preview height:
+
+```tsx
+const [timelineHeight, setTimelineHeight] = useState(160);
+
+<VideoEditor
+  defaultProject={project}
+  timelineHeight={timelineHeight}   // reactive — drag a slider, the
+                                    // editor recompacts in place
+  trackHeight={40}                  // initial-only; needs remount to
+                                    // change (key={trackHeight})
+/>
+```
+
+Range guidance: `timelineHeight` ∈ [120, 480], `trackHeight` ∈ [28, 96], `rulerHeight` ∈ [18, 36]. The internal canvas scrolls vertically when tracks overflow.
 
 ## Custom playback engine
 

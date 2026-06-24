@@ -1,6 +1,6 @@
 # @aicut/core
 
-> Framework-agnostic engine for the AiCut video editor — canvas timeline, plain-JSON projects, zero runtime deps.
+> Framework-agnostic engine for the AiCut video editor — canvas timeline, plain-JSON projects, pluggable playback. Main entry has zero runtime deps; opt-in sub-entries bundle their own (three.js for `/lighting`, mp4box.js for `/webcodecs`).
 
 [![npm](https://img.shields.io/npm/v/@aicut/core.svg)](https://www.npmjs.com/package/@aicut/core)
 [![License](https://img.shields.io/npm/l/@aicut/core.svg)](./LICENSE)
@@ -232,6 +232,39 @@ Editor.create({ container, project, playbackEngine: factory });
 ```
 
 `WebCodecsEngine` v1 covers single-track MP4/MOV playback (H.264 / HEVC / VP9 / AV1 — whatever the browser's `VideoDecoder` supports). Multi-track compositing, audio, transitions land in follow-up releases on the same surface.
+
+## Timeline density
+
+Defaults are tuned for desktop. For compact viewports (laptop side panels, embedded editors), shrink the bottom area and / or row height:
+
+```ts
+Editor.create({
+  container,
+  project,
+  timelineHeight: 160,     // outer height of the bottom timeline area
+                           // (default 240). Scrolls internally when
+                           // tracks overflow.
+  trackHeight: 40,         // each track row (default 56). Affects clip
+                           // body + thumbnail strip.
+  rulerHeight: 22,         // time-label strip (default 24).
+});
+```
+
+| Option | Default | Useful range | Notes |
+| --- | --- | --- | --- |
+| `timelineHeight` | 240 | 120 – 480 | Outer height of `.aicut-timeline`. Reactive in the React + Vue wrappers — swap any time. Internal scroll appears when tracks don't fit. |
+| `trackHeight` | 56 | 28 – 96 | Per-row pixel height. Applied process-wide via `setTimelineMetrics` (see below). Re-apply by remounting the editor. |
+| `rulerHeight` | 24 | 18 – 36 | Time-label strip height. Same lifecycle as `trackHeight`. |
+
+For runtime control without an editor option, call the underlying setter directly:
+
+```ts
+import { setTimelineMetrics } from "@aicut/core";
+
+setTimelineMetrics({ trackHeight: 36, rulerHeight: 20 });
+```
+
+`TRACK_HEIGHT` and `RULER_HEIGHT` are ESM live bindings — re-reading them after the setter returns the updated values.
 
 ## Lighting picker (opt-in sub-entry)
 

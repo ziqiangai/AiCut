@@ -74,8 +74,16 @@ editor.value?.api()?.setProject(saved);
 ```ts
 interface VideoEditorProps {
   defaultProject?: Project;
-  theme?: Theme;            // CSS-var overrides; reactive
-  locale?: Partial<Locale>; // EN default; pass localeZh for ZH; reactive
+  theme?: Theme;                          // CSS-var overrides; reactive
+  locale?: Partial<Locale>;               // EN default; pass localeZh for ZH; reactive
+
+  playbackEngine?: PlaybackEngineFactory; // pluggable playback; default
+                                          //   HtmlVideoEngine. Bound at mount.
+  timelineHeight?: number;                // outer height of bottom area
+                                          //   (default 240). Reactive.
+  trackHeight?: number;                   // per-row height (default 56);
+                                          //   process-wide, initial-only.
+  rulerHeight?: number;                   // time-label strip (default 24).
 }
 ```
 
@@ -145,6 +153,27 @@ const locale = computed<Locale>(() =>
 ```
 
 `locale` swap re-titles the toolbar and re-paints canvas labels in place.
+
+## Compact viewports
+
+Default chrome is sized for desktop. For laptop side panels or embedded editors, shrink the bottom area to reclaim preview height:
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue";
+const timelineHeight = ref(160);
+</script>
+
+<template>
+  <VideoEditor
+    :default-project="project"
+    :timeline-height="timelineHeight"
+    :track-height="40"
+  />
+</template>
+```
+
+`timelineHeight` is reactive — bind it to a slider and the editor recompacts in place. `trackHeight` / `rulerHeight` are initial-only (process-wide via `setTimelineMetrics`); change + remount to re-apply. Range guidance: `timelineHeight` ∈ [120, 480], `trackHeight` ∈ [28, 96], `rulerHeight` ∈ [18, 36].
 
 ## Custom playback engine
 

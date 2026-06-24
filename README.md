@@ -383,6 +383,11 @@ pnpm install                       # workspace install
 pnpm build                         # build core / react / vue
 pnpm demo:react                    # http://127.0.0.1:5173
 
+# Demo media: drop two H.264 MP4/MOV files at
+#   examples/react-demo/public/{a,b}.mov
+# Served same-origin so both <video> and WebCodecs/fetch work without
+# CORS gymnastics. Gitignored — replace with your own clips.
+
 # Backends
 cd backends/ts && pnpm dev         # http://127.0.0.1:8787
 cd backends/go && go run .         # http://127.0.0.1:8788
@@ -418,6 +423,7 @@ The script is idempotent — already-published versions are skipped, so a re-run
 - [x] 3D lighting picker (`@aicut/core/lighting` sub-entry)
 - [x] Pluggable `PlaybackEngine` interface (HTML5 default, host can inject)
 - [x] WebCodecs preview engine for frame-accurate seek (`@aicut/core/webcodecs`, PoC: single-track MP4)
+- [x] Density knobs — `timelineHeight` (reactive), `trackHeight`, `rulerHeight` for compact viewports
 - [ ] Speed adjustment (timeline already reserves the slot)
 - [ ] Audio track rendering + waveform thumbnails
 - [ ] WebCodecs engine: multi-track compositing + transitions
