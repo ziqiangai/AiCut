@@ -118,6 +118,10 @@ const DEFAULT_SCALE = 80;
 const WHEEL_ZOOM_RATE = 0.012;
 const SCROLLBAR_FADE_HOLD_MS = 800;
 const SCROLLBAR_FADE_OUT_MS = 400;
+/** Persistent dimmed opacity when content overflows but no recent
+ *  interaction. Tells users "scrolling is possible" without flashing
+ *  the bar constantly. Pops to 1 on hover / wheel / drag. */
+const SCROLLBAR_IDLE_OPACITY = 0.28;
 
 /**
  * Canvas-rendered, framework-free timeline. Owns ruler, multi-track
@@ -489,9 +493,17 @@ export class Timeline {
 
   /**
    * Scrollbar opacity = full for SCROLLBAR_FADE_HOLD_MS after last
-   * interaction, then linearly fades to 0 over SCROLLBAR_FADE_OUT_MS.
-   * Hovering or actively dragging the bar pins opacity at 1. Returns
-   * 0 if the bar isn't needed (content fits).
+   * interaction, then linearly fades down. Hovering or actively
+   * dragging the bar pins opacity at 1.
+   *
+   * Floor at SCROLLBAR_IDLE_OPACITY (~0.28) instead of 0 when the
+   * content actually overflows — without this, on a compact timeline
+   * with overflowing tracks the bar disappears 4s after the last
+   * interaction and users have no affordance that scrolling is
+   * possible. The dimmed bar is a quiet permanent hint; it pops to
+   * full opacity the moment they touch it.
+   *
+   * Returns 0 when the bar isn't needed (content fits).
    */
   private scrollbarOpacity(axis: "v" | "h"): number {
     if (axis === "v" && this.maxScrollTop() <= 0) return 0;
@@ -506,8 +518,9 @@ export class Timeline {
     const elapsed = Date.now() - last;
     if (elapsed < SCROLLBAR_FADE_HOLD_MS) return 1;
     const fade = elapsed - SCROLLBAR_FADE_HOLD_MS;
-    if (fade >= SCROLLBAR_FADE_OUT_MS) return 0;
-    return 1 - fade / SCROLLBAR_FADE_OUT_MS;
+    const decayed =
+      fade >= SCROLLBAR_FADE_OUT_MS ? 0 : 1 - fade / SCROLLBAR_FADE_OUT_MS;
+    return Math.max(decayed, SCROLLBAR_IDLE_OPACITY);
   }
 
   /** Mark a scrollbar axis as just-touched so its fade timer restarts. */
