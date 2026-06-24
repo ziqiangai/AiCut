@@ -44,4 +44,6 @@ export type {
 export {
   HtmlVideoEngine,
   htmlVideoEngineFactory,
+  CanvasCompositorEngine,
+  canvasCompositorEngineFactory,
 } from "./playback/index.js";

@@ -22,4 +22,6 @@ export {
   localeZh,
   HtmlVideoEngine,
   htmlVideoEngineFactory,
+  CanvasCompositorEngine,
+  canvasCompositorEngineFactory,
 } from "@aicut/core";

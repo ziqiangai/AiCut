@@ -2,11 +2,14 @@ import { useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   Timeline,
   VideoEditor,
+  canvasCompositorEngineFactory,
   createEmptyProject,
   createId,
+  htmlVideoEngineFactory,
   localeEn,
   localeZh,
   type Locale,
+  type PlaybackEngineFactory,
   type Project,
   type Theme,
   type TimelineApi,
@@ -232,6 +235,20 @@ export function App() {
     () => (localeName === "zh" ? localeZh : localeEn),
     [localeName],
   );
+  // Demo of the new pluggable playback engine — flip between the
+  // default HtmlVideoEngine and a host-supplied CanvasCompositorEngine
+  // (a real second implementation: same browser decode, but rendering
+  // happens via ctx.drawImage on a single canvas + a debug HUD).
+  // The engine binds at construction, so we force a VideoEditor
+  // remount via `key={engineKind}` when this changes.
+  const [engineKind, setEngineKind] = useState<"html" | "canvas">("html");
+  const playbackEngine: PlaybackEngineFactory = useMemo(
+    () =>
+      engineKind === "canvas"
+        ? canvasCompositorEngineFactory
+        : htmlVideoEngineFactory,
+    [engineKind],
+  );
   const [exportStatus, setExportStatus] = useState<ExportStatus>({ running: false });
   const exportAbortRef = useRef<AbortController | null>(null);
   // Latest backend pick — read inside the editor `export` listener
@@ -329,10 +346,15 @@ export function App() {
     <div className="demo-shell">
       <div className="demo-editor">
         <VideoEditor
+          // The engine binds at construction — flipping `engineKind`
+          // forces React to remount the editor with the new factory
+          // (playback state resets, which is acceptable for a demo).
+          key={engineKind}
           apiRef={apiRef}
           defaultProject={seed()}
           theme={theme}
           locale={locale}
+          playbackEngine={playbackEngine}
           style={{ height: "100%" }}
           headerLeft={
             showHeader ? (
@@ -495,6 +517,36 @@ export function App() {
           >
             {localeName === "en" ? "Switch to 中文" : "Switch to English"}
           </button>
+        </div>
+
+        <h2>Playback engine</h2>
+        <div className="demo-row demo-engine-row">
+          <label>
+            <input
+              type="radio"
+              name="engine"
+              value="html"
+              data-testid="demo-engine-html"
+              checked={engineKind === "html"}
+              onChange={() => setEngineKind("html")}
+            />
+            <span>HTML5 video (default)</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="engine"
+              value="canvas"
+              data-testid="demo-engine-canvas"
+              checked={engineKind === "canvas"}
+              onChange={() => setEngineKind("canvas")}
+            />
+            <span>Canvas compositor (host-supplied)</span>
+          </label>
+          <p className="demo-engine-help">
+            Same interface, different rendering surface. The canvas
+            engine paints a HUD badge so you can see who's drawing.
+          </p>
         </div>
 
         <h2>Header</h2>

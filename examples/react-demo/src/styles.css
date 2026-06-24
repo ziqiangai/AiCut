@@ -71,6 +71,28 @@ body,
   user-select: none;
 }
 
+.demo-engine-row {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.demo-engine-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.demo-engine-help {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.55);
+  line-height: 1.4;
+}
+
 /* Title text on the left of the editor header — picks up the
    library's chrome text colour automatically. */
 .demo-header-title {
