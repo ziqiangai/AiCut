@@ -207,43 +207,149 @@
   box-shadow: 0 0 6px rgba(255, 51, 134, 0.5);
 }
 
-/* Easing dropdown row — shares the row layout with the number rows
-   but uses a <select> styled to look like the inputs above. */
-.aicut-keyframe-panel__row--easing select {
+/* Custom easing dropdown — themed to match the rest of the panel.
+   Trigger acts like a button, the floating menu is brand-aware and
+   uses a subtle gradient + box-shadow for elevation. */
+.aicut-keyframe-panel__dropdown {
   flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+.aicut-keyframe-panel__dropdown-trigger {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   width: 100%;
-  padding: 5px 8px;
+  padding: 5px 8px 5px 10px;
   font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: left;
+  cursor: pointer;
   color: var(--aicut-controls-text, rgba(255, 255, 255, 0.92));
   background: var(--aicut-controls-hover, rgba(255, 255, 255, 0.06));
   border: 1px solid var(--aicut-controls-border, rgba(255, 255, 255, 0.12));
   border-radius: 6px;
-  appearance: none;
-  cursor: pointer;
-  /* Tiny chevron drawn with a gradient — no extra asset. */
-  background-image:
-    linear-gradient(45deg, transparent 50%, currentColor 50%),
-    linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position:
-    calc(100% - 14px) 50%,
-    calc(100% - 10px) 50%;
-  background-size:
-    4px 4px,
-    4px 4px;
-  background-repeat: no-repeat;
-  padding-right: 24px;
+  transition:
+    border-color 120ms ease-out,
+    background-color 120ms ease-out,
+    box-shadow 120ms ease-out;
 }
-.aicut-keyframe-panel__row--easing select:hover:not(:disabled) {
-  background-color: var(--aicut-controls-active, rgba(255, 255, 255, 0.1));
+.aicut-keyframe-panel__dropdown-trigger:hover {
+  background: var(--aicut-controls-active, rgba(255, 255, 255, 0.1));
+  border-color: var(--color-brand, #ff3386);
 }
-.aicut-keyframe-panel__row--easing select:focus {
+.aicut-keyframe-panel__dropdown-trigger:focus-visible {
   outline: none;
   border-color: var(--color-brand, #ff3386);
   box-shadow: 0 0 0 2px rgba(255, 51, 134, 0.22);
 }
-.aicut-keyframe-panel__row--easing select:disabled {
-  opacity: 0.5;
+.aicut-keyframe-panel__dropdown-trigger--open {
+  border-color: var(--color-brand, #ff3386);
+  background: var(--aicut-controls-active, rgba(255, 255, 255, 0.1));
+  box-shadow: 0 0 0 2px rgba(255, 51, 134, 0.22);
+}
+.aicut-keyframe-panel__dropdown-trigger--disabled,
+.aicut-keyframe-panel__dropdown-trigger:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
+}
+
+.aicut-keyframe-panel__dropdown-trigger-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Chevron — pure CSS triangle, rotates when the menu opens. */
+.aicut-keyframe-panel__dropdown-chevron {
+  flex: 0 0 6px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  opacity: 0.75;
+  transition:
+    transform 140ms ease-out,
+    opacity 120ms ease-out;
+  transform-origin: 50% 35%;
+}
+.aicut-keyframe-panel__dropdown-trigger--open
+  .aicut-keyframe-panel__dropdown-chevron {
+  transform: rotate(180deg);
+  opacity: 1;
+  color: var(--color-brand, #ff3386);
+}
+
+/* Floating menu. Positioned right under the trigger; the panel
+   uses `position: relative` on `.dropdown` so absolute-positioning
+   here means "anchored to the trigger". */
+.aicut-keyframe-panel__dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--aicut-controls-bg, rgba(20, 20, 22, 0.96));
+  border: 1px solid var(--aicut-controls-border, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.32),
+    0 0 0 1px rgba(255, 51, 134, 0.06);
+  backdrop-filter: blur(8px);
+  animation: aicut-keyframe-dropdown-in 120ms ease-out;
+}
+@keyframes aicut-keyframe-dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.aicut-keyframe-panel__dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px 7px 26px;
+  position: relative;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--aicut-controls-text, rgba(255, 255, 255, 0.92));
+  border-radius: 5px;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+  transition: background-color 80ms ease-out;
+}
+.aicut-keyframe-panel__dropdown-item:hover,
+.aicut-keyframe-panel__dropdown-item:focus {
+  background: var(--aicut-controls-active, rgba(255, 255, 255, 0.1));
+}
+.aicut-keyframe-panel__dropdown-item--selected {
+  color: var(--color-brand, #ff3386);
+}
+/* Checkmark for the selected item — drawn with two CSS borders. */
+.aicut-keyframe-panel__dropdown-item--selected::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 4px;
+  height: 8px;
+  margin-top: -5px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
 }
 
 .aicut-keyframe-panel__actions {

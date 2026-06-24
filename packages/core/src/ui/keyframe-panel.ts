@@ -48,10 +48,19 @@ export class KeyframePanel {
   private timeLabel: HTMLSpanElement;
   private titleLabel!: HTMLSpanElement;
   private resetBtn: HTMLButtonElement;
-  private easingSelect!: HTMLSelectElement;
+  private easingTrigger!: HTMLButtonElement;
+  private easingTriggerLabel!: HTMLSpanElement;
+  private easingMenu!: HTMLUListElement;
+  private easingItems!: Map<EasingKind, HTMLLIElement>;
+  private easingValue: EasingKind = "linear";
+  private easingDisabled = false;
+  private easingOpen = false;
   private easingLabelEl!: HTMLLabelElement;
   private rowLabels!: Record<KeyframeProp, HTMLLabelElement>;
   private lastSyncKey = "";
+  // Bound once so add/remove listener pairs reference the same fn.
+  private boundOutsideClick: ((e: MouseEvent) => void) | null = null;
+  private boundDocKeydown: ((e: KeyboardEvent) => void) | null = null;
 
   constructor(host: HTMLElement, editor: Editor, locale: Locale) {
     this.editor = editor;
@@ -93,19 +102,67 @@ export class KeyframePanel {
 
     // Easing — one dropdown applies to all three props at this moment.
     // Shapes the curve from THIS moment to the next kf on each prop.
+    // Custom dropdown (not native <select>) so the floating panel can
+    // be themed consistently across browsers — native <option> styling
+    // is OS-locked and looks foreign next to the rest of the panel.
     const easingRow = document.createElement("div");
     easingRow.className =
       "aicut-keyframe-panel__row aicut-keyframe-panel__row--easing";
     this.easingLabelEl = document.createElement("label");
-    this.easingSelect = document.createElement("select");
-    this.easingSelect.setAttribute("data-testid", "aicut-kf-easing");
+
+    const dd = document.createElement("div");
+    dd.className = "aicut-keyframe-panel__dropdown";
+    dd.setAttribute("data-testid", "aicut-kf-easing");
+
+    this.easingTrigger = document.createElement("button");
+    this.easingTrigger.type = "button";
+    this.easingTrigger.className = "aicut-keyframe-panel__dropdown-trigger";
+    this.easingTrigger.setAttribute("aria-haspopup", "listbox");
+    this.easingTrigger.setAttribute("aria-expanded", "false");
+    this.easingTriggerLabel = document.createElement("span");
+    this.easingTriggerLabel.className =
+      "aicut-keyframe-panel__dropdown-trigger-label";
+    const chevron = document.createElement("span");
+    chevron.className = "aicut-keyframe-panel__dropdown-chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    this.easingTrigger.append(this.easingTriggerLabel, chevron);
+    this.easingTrigger.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (this.easingDisabled) return;
+      this.toggleEasingMenu();
+    });
+    this.easingTrigger.addEventListener("keydown", (e) => {
+      if (this.easingDisabled) return;
+      if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+        e.preventDefault();
+        if (!this.easingOpen) this.openEasingMenu();
+        // Focus the currently selected item so arrows step from there.
+        this.easingItems.get(this.easingValue)?.focus();
+      }
+    });
+
+    this.easingMenu = document.createElement("ul");
+    this.easingMenu.className = "aicut-keyframe-panel__dropdown-menu";
+    this.easingMenu.setAttribute("role", "listbox");
+    this.easingMenu.style.display = "none";
+    this.easingItems = new Map();
     for (const value of EASING_VALUES) {
-      const o = document.createElement("option");
-      o.value = value;
-      this.easingSelect.appendChild(o);
+      const li = document.createElement("li");
+      li.className = "aicut-keyframe-panel__dropdown-item";
+      li.setAttribute("role", "option");
+      li.setAttribute("data-value", value);
+      li.setAttribute("tabindex", "-1");
+      li.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.selectEasing(value);
+      });
+      li.addEventListener("keydown", (e) => this.onMenuKeydown(e, value));
+      this.easingItems.set(value, li);
+      this.easingMenu.appendChild(li);
     }
-    this.easingSelect.addEventListener("change", () => this.onEasingChange());
-    easingRow.append(this.easingLabelEl, this.easingSelect);
+
+    dd.append(this.easingTrigger, this.easingMenu);
+    easingRow.append(this.easingLabelEl, dd);
     this.root.appendChild(easingRow);
 
     const actions = document.createElement("div");
@@ -141,13 +198,21 @@ export class KeyframePanel {
     this.easingLabelEl.textContent = this.locale.keyframePanelLabelEasing;
     this.resetBtn.textContent = this.locale.keyframePanelReset;
     this.resetBtn.title = this.locale.keyframePanelResetTitle;
-    // Re-label each existing easing <option> in the dropdown.
-    for (const opt of Array.from(this.easingSelect.options)) {
-      opt.textContent = easingLabel(opt.value as EasingKind, this.locale);
+    // Re-label each menu item + the trigger's visible label.
+    for (const [value, li] of this.easingItems) {
+      li.textContent = easingLabel(value, this.locale);
     }
+    this.easingTriggerLabel.textContent = easingLabel(
+      this.easingValue,
+      this.locale,
+    );
   }
 
   destroy(): void {
+    // Make sure the document-level listeners detached if the panel is
+    // torn down while the menu was open (e.g. editor.destroy() during
+    // an interaction).
+    this.closeEasingMenu();
     this.root.remove();
   }
 
@@ -205,13 +270,11 @@ export class KeyframePanel {
     this.setIfBlur(this.inputs.panY, String(Math.round(v.panY)));
     this.setIfBlur(this.inputs.scale, v.scale.toFixed(2));
     this.timeLabel.textContent = `${(time / 1000).toFixed(2)}${this.locale.keyframePanelTimeSuffix}`;
-    if (this.easingSelect.value !== sharedEasing) {
-      this.easingSelect.value = sharedEasing;
-    }
+    this.setEasingValue(sharedEasing);
     // Disable when there's no kf at this moment to attach easing to —
     // panel can also surface for "future kf" cases where the moment
     // array is empty.
-    this.easingSelect.disabled = moment.length === 0;
+    this.setEasingDisabled(moment.length === 0);
 
     // Filled dot = a keyframe for THIS prop pins THIS moment.
     // Outlined = no kf at this moment for the prop (the displayed
@@ -296,14 +359,113 @@ export class KeyframePanel {
     }
   }
 
-  private onEasingChange(): void {
+  // ---- custom dropdown -------------------------------------------------
+
+  private setEasingValue(value: EasingKind): void {
+    if (this.easingValue === value) return;
+    this.easingValue = value;
+    this.easingTriggerLabel.textContent = easingLabel(value, this.locale);
+    for (const [v, li] of this.easingItems) {
+      li.classList.toggle(
+        "aicut-keyframe-panel__dropdown-item--selected",
+        v === value,
+      );
+      li.setAttribute("aria-selected", v === value ? "true" : "false");
+    }
+  }
+
+  private setEasingDisabled(disabled: boolean): void {
+    if (this.easingDisabled === disabled) return;
+    this.easingDisabled = disabled;
+    this.easingTrigger.disabled = disabled;
+    this.easingTrigger.classList.toggle(
+      "aicut-keyframe-panel__dropdown-trigger--disabled",
+      disabled,
+    );
+    if (disabled && this.easingOpen) this.closeEasingMenu();
+  }
+
+  private toggleEasingMenu(): void {
+    if (this.easingOpen) this.closeEasingMenu();
+    else this.openEasingMenu();
+  }
+
+  private openEasingMenu(): void {
+    if (this.easingOpen || this.easingDisabled) return;
+    this.easingOpen = true;
+    this.easingMenu.style.display = "";
+    this.easingTrigger.setAttribute("aria-expanded", "true");
+    this.easingTrigger.classList.add(
+      "aicut-keyframe-panel__dropdown-trigger--open",
+    );
+    // rAF defers the listeners so the same click event that opened
+    // the menu doesn't immediately close it via the outside-click path.
+    requestAnimationFrame(() => {
+      if (!this.easingOpen) return;
+      this.boundOutsideClick = (e: MouseEvent) => {
+        if (!this.easingMenu.contains(e.target as Node)
+          && !this.easingTrigger.contains(e.target as Node)) {
+          this.closeEasingMenu();
+        }
+      };
+      this.boundDocKeydown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          this.closeEasingMenu();
+          this.easingTrigger.focus();
+        } else if (e.key === "Tab") {
+          // Tabbing out should close the menu.
+          this.closeEasingMenu();
+        }
+      };
+      document.addEventListener("click", this.boundOutsideClick, true);
+      document.addEventListener("keydown", this.boundDocKeydown);
+    });
+  }
+
+  private closeEasingMenu(): void {
+    if (!this.easingOpen) return;
+    this.easingOpen = false;
+    this.easingMenu.style.display = "none";
+    this.easingTrigger.setAttribute("aria-expanded", "false");
+    this.easingTrigger.classList.remove(
+      "aicut-keyframe-panel__dropdown-trigger--open",
+    );
+    if (this.boundOutsideClick) {
+      document.removeEventListener("click", this.boundOutsideClick, true);
+      this.boundOutsideClick = null;
+    }
+    if (this.boundDocKeydown) {
+      document.removeEventListener("keydown", this.boundDocKeydown);
+      this.boundDocKeydown = null;
+    }
+  }
+
+  private selectEasing(value: EasingKind): void {
+    this.closeEasingMenu();
+    this.easingTrigger.focus();
     const sel = this.editor.getSelectedKeyframe();
     if (!sel) return;
     const clip = this.findClip(sel.clipId);
     const anchorKf = clip?.keyframes?.find((k) => k.id === sel.keyframeId);
     if (!clip || !anchorKf) return;
-    const next = this.easingSelect.value as EasingKind;
-    this.editor.setKeyframesEasingAtTime(sel.clipId, anchorKf.time, next);
+    this.editor.setKeyframesEasingAtTime(sel.clipId, anchorKf.time, value);
+  }
+
+  private onMenuKeydown(e: KeyboardEvent, value: EasingKind): void {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      this.selectEasing(value);
+      return;
+    }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const idx = EASING_VALUES.indexOf(value);
+      const next = e.key === "ArrowDown"
+        ? EASING_VALUES[(idx + 1) % EASING_VALUES.length]!
+        : EASING_VALUES[(idx - 1 + EASING_VALUES.length) % EASING_VALUES.length]!;
+      this.easingItems.get(next)?.focus();
+    }
   }
 
   private onReset(): void {
