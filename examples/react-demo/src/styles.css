@@ -103,6 +103,63 @@ body,
   line-height: 1.4;
 }
 
+.demo-kf-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  margin-top: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.demo-kf-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.demo-kf-row label {
+  flex: 0 0 36px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.demo-kf-row input[type="number"] {
+  flex: 1;
+  padding: 4px 6px;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 5px;
+  background: #fff;
+}
+
+.demo-kf-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.demo-kf-actions button {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.demo-kf-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.demo-kf-actions button:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.04);
+}
+
 /* Title text on the left of the editor header — picks up the
    library's chrome text colour automatically. */
 .demo-header-title {
