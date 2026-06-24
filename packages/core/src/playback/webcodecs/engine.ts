@@ -72,7 +72,14 @@ export class WebCodecsEngine implements PlaybackEngine {
   private lastFrameTs = 0;
   private decodedFramesTotal = 0;
   private destroyed = false;
-  /** CSS-pixel rect of last painted frame; null when nothing visible. */
+  /** Output frame rect (fixed bounds, no transform) in CSS pixels. */
+  private lastOutputRect: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null = null;
+  /** Post-transform content rect in CSS pixels. */
   private lastFrameRect: {
     x: number;
     y: number;
@@ -213,6 +220,12 @@ export class WebCodecsEngine implements PlaybackEngine {
     for (const src of this.sources.values()) this.teardownSource(src);
     this.sources.clear();
     this.mount.remove();
+  }
+
+  getOutputFrameRect():
+    | { x: number; y: number; w: number; h: number }
+    | null {
+    return this.lastOutputRect;
   }
 
   getFrameRect(): { x: number; y: number; w: number; h: number } | null {
@@ -578,13 +591,25 @@ export class WebCodecsEngine implements PlaybackEngine {
         // DPR-scaled canvas coordinate space.
         const dpr = window.devicePixelRatio || 1;
         const t = getEffectiveTransform(clip, localMs);
+        // Output frame (no transform) — clip to it so PiP / pan show
+        // letterbox bg instead of editor chrome.
+        const outX = (cw - dw) / 2;
+        const outY = (ch - dh) / 2;
         this.ctx.save();
+        this.ctx.beginPath();
+        this.ctx.rect(outX, outY, dw, dh);
+        this.ctx.clip();
         this.ctx.translate(cw / 2 + t.x * dpr, ch / 2 + t.y * dpr);
         this.ctx.scale(t.scale, t.scale);
         this.ctx.drawImage(chosenFrame, -dw / 2, -dh / 2, dw, dh);
         this.ctx.restore();
-        // Stash post-transform CSS-pixel rect for the keyframe
-        // editing overlay.
+        // CSS-pixel rects for the overlay.
+        this.lastOutputRect = {
+          x: outX / dpr,
+          y: outY / dpr,
+          w: dw / dpr,
+          h: dh / dpr,
+        };
         const cssCx = cw / (2 * dpr) + t.x;
         const cssCy = ch / (2 * dpr) + t.y;
         const cssW = (dw * t.scale) / dpr;
@@ -597,6 +622,7 @@ export class WebCodecsEngine implements PlaybackEngine {
         };
       } else {
         this.lastFrameRect = null;
+        this.lastOutputRect = null;
       }
       // Keep the decoder fed for upcoming frames.
       this.feedDecoder(src);

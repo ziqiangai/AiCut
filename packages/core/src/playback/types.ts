@@ -49,18 +49,27 @@ export interface PlaybackEngine {
   destroy(): void;
 
   /**
+   * Optional. The **output frame rect** — the fixed bounds anything
+   * the engine renders is clipped to. The user's keyframe X / Y /
+   * scale move the content WITHIN this frame (think picture-in-
+   * picture, pan, zoom); anything outside is hidden by the engine.
+   *
+   * This rect does NOT change with the active transform — it's
+   * the stage. The overlay's dashed border is drawn here. Coords
+   * relative to `opts.host`. Returns null when no clip is active.
+   */
+  getOutputFrameRect?(): { x: number; y: number; w: number; h: number } | null;
+
+  /**
    * Optional. Return the screen-space CSS-pixel rectangle of the
-   * actually-rendered frame within the engine's mount element. Used by
-   * the keyframe editing overlay to draw the frame border + position
-   * scale handles + translate pointer deltas to keyframe X / Y.
+   * actually-rendered content (the video frame after the active
+   * keyframe transform is applied). May extend outside the output
+   * frame — the engine clips to the output frame at paint time, but
+   * the overlay still wants the geometric rect to position scale
+   * handles on the visible content corners.
    *
-   * Coords are relative to `opts.host` (top-left of the mount). The
-   * returned rect already reflects the active keyframe transform — so
-   * the overlay draws around the moved/scaled frame.
-   *
-   * Engines that can't compute this (or where it's meaningless — e.g.
-   * an audio-only engine) return null. The editor falls back to a
-   * no-op overlay; keyframe values can still be edited via the panel.
+   * Returns null when no clip is active. Engines that don't expose
+   * this leave keyframe handles attached to the output frame instead.
    */
   getFrameRect?(): { x: number; y: number; w: number; h: number } | null;
 

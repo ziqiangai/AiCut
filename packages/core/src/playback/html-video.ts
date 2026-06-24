@@ -7,11 +7,13 @@ import type {
 } from "./types.js";
 
 /**
- * Default preview engine — one hidden `<video>` per `MediaSource`,
- * "active" video shown for the current playhead. Tick loop drives a
- * single video track's playhead, advancing through clips end-to-end.
- * When the playhead crosses a clip boundary we pause the outgoing
- * video and resume the next at `clip.in`.
+ * Default preview engine — one wrapper + `<video>` pair per
+ * `MediaSource`. The wrapper is sized to the OUTPUT frame (the base
+ * contain-letterbox rect) with `overflow: hidden` so any keyframe
+ * transform applied to the inner video gets clipped to the output
+ * bounds. That's what makes pan / zoom / picture-in-picture work:
+ * translating the video reveals the wrapper's letterbox color, not
+ * the rest of the editor chrome.
  *
  * Strengths: zero deps, browser-native decode (GPU when available),
  * works in every browser today.
@@ -21,19 +23,25 @@ import type {
  * transitions / shaders / filters. See `WebCodecsEngine` for the
  * frame-accurate path.
  */
+interface SourceState {
+  /** Clipping container — positioned + sized to the OUTPUT frame each
+   *  frame so any video transform clips against the output bounds. */
+  wrapper: HTMLDivElement;
+  video: HTMLVideoElement;
+}
+
 export class HtmlVideoEngine implements PlaybackEngine {
   private host: HTMLElement;
   private mount: HTMLDivElement;
-  private videos = new Map<string, HTMLVideoElement>();
+  private sources = new Map<string, SourceState>();
   private project: Project;
   private currentClipId: string | null = null;
   private playing = false;
   private timeMs: Ms = 0;
   private rafHandle: number | null = null;
   private lastFrameTs = 0;
-  /** Permanent low-rate rAF that pushes keyframe transform onto the
-   *  active <video> element via CSS `transform`. One style write per
-   *  frame on at most one element — negligible cost. */
+  /** Permanent rAF that positions the active wrapper at the output
+   *  rect + pushes keyframe transform onto the inner video via CSS. */
   private transformRaf: number | null = null;
 
   /** Public event hooks — set by Editor. */
@@ -48,6 +56,12 @@ export class HtmlVideoEngine implements PlaybackEngine {
     this.project = opts.project;
     this.mount = document.createElement("div");
     this.mount.className = "aicut-preview";
+    Object.assign(this.mount.style, {
+      position: "absolute",
+      inset: "0",
+      width: "100%",
+      height: "100%",
+    } satisfies Partial<CSSStyleDeclaration>);
     this.host.appendChild(this.mount);
     this.syncSources();
     this.startTransformLoop();
@@ -56,8 +70,6 @@ export class HtmlVideoEngine implements PlaybackEngine {
   setProject(next: Project): void {
     this.project = next;
     this.syncSources();
-    // Re-resolve the active clip for the current playhead across ALL
-    // video tracks. If the clip we were on was removed, snap back to 0.
     const clip = this.clipAtTime(this.timeMs);
     if (!clip) {
       this.timeMs = 0;
@@ -77,9 +89,9 @@ export class HtmlVideoEngine implements PlaybackEngine {
     if (this.timeMs < clip.start) this.timeMs = clip.start;
     this.activate(clip);
     this.seekVideoToClipOffset(clip, this.timeMs - clip.start);
-    const v = this.videos.get(clip.sourceId);
-    if (!v) return;
-    void v.play().catch((err) => this.onError?.(err as Error));
+    const s = this.sources.get(clip.sourceId);
+    if (!s) return;
+    void s.video.play().catch((err) => this.onError?.(err as Error));
     this.playing = true;
     this.startTickLoop();
   }
@@ -91,8 +103,7 @@ export class HtmlVideoEngine implements PlaybackEngine {
     if (this.currentClipId) {
       const clip = this.clipById(this.currentClipId);
       if (clip) {
-        const v = this.videos.get(clip.sourceId);
-        v?.pause();
+        this.sources.get(clip.sourceId)?.video.pause();
       }
     }
   }
@@ -124,12 +135,20 @@ export class HtmlVideoEngine implements PlaybackEngine {
   }
 
   /**
-   * Screen-space rect of the actually-rendered frame, in CSS pixels,
-   * relative to the host element. Includes the active keyframe
-   * transform (translate + scale) that the rAF loop applies to the
-   * `<video>` element via CSS — so the overlay's frame border tracks
-   * the video as the user drags it. Returns null when no clip is
-   * active or the active video has no metadata yet.
+   * The OUTPUT frame — the fixed stage the rendered video is clipped
+   * to. Independent of the keyframe transform. Used by the overlay to
+   * draw the dashed border at a stable position.
+   */
+  getOutputFrameRect():
+    | { x: number; y: number; w: number; h: number }
+    | null {
+    return this.baseFrameRect();
+  }
+
+  /**
+   * The CONTENT frame — where the transformed video pixels actually
+   * land. Equal to the output frame when transform is identity; may
+   * extend outside (zoom in) or fit inside (zoom out) when not.
    */
   getFrameRect(): { x: number; y: number; w: number; h: number } | null {
     const base = this.baseFrameRect();
@@ -137,8 +156,6 @@ export class HtmlVideoEngine implements PlaybackEngine {
     const clip = this.clipById(this.currentClipId!);
     if (!clip) return base;
     const t = getEffectiveTransform(clip, this.timeMs - clip.start);
-    // Apply the same transform we put on the video element so the
-    // overlay border / handles line up with the pixels the user sees.
     const cx = base.x + base.w / 2 + t.x;
     const cy = base.y + base.h / 2 + t.y;
     const w = base.w * t.scale;
@@ -146,15 +163,17 @@ export class HtmlVideoEngine implements PlaybackEngine {
     return { x: cx - w / 2, y: cy - h / 2, w, h };
   }
 
-  /** Untransformed contain-letterbox rect. */
+  /** Untransformed contain-letterbox rect — the OUTPUT frame. */
   private baseFrameRect():
     | { x: number; y: number; w: number; h: number }
     | null {
     if (!this.currentClipId) return null;
     const clip = this.clipById(this.currentClipId);
     if (!clip) return null;
-    const v = this.videos.get(clip.sourceId);
-    if (!v || v.videoWidth === 0 || v.videoHeight === 0) return null;
+    const s = this.sources.get(clip.sourceId);
+    if (!s) return null;
+    const v = s.video;
+    if (v.videoWidth === 0 || v.videoHeight === 0) return null;
     const hostRect = this.host.getBoundingClientRect();
     const cw = hostRect.width;
     const ch = hostRect.height;
@@ -166,9 +185,9 @@ export class HtmlVideoEngine implements PlaybackEngine {
   }
 
   /**
-   * Push the active clip's keyframe transform onto the visible <video>
-   * via CSS. Inactive videos get the identity transform so they stay
-   * pristine. Cheap — one style write per visible video per rAF.
+   * Permanent rAF that (a) sizes + positions the active wrapper to
+   * the output frame, and (b) writes the keyframe transform onto the
+   * inner video. Negligible cost — three style writes per frame max.
    */
   private startTransformLoop(): void {
     const tick = (): void => {
@@ -182,21 +201,29 @@ export class HtmlVideoEngine implements PlaybackEngine {
     const clip = this.currentClipId
       ? this.clipById(this.currentClipId)
       : null;
-    if (clip) {
-      const v = this.videos.get(clip.sourceId);
-      if (v) {
+    const outRect = this.baseFrameRect();
+    if (clip && outRect) {
+      const s = this.sources.get(clip.sourceId);
+      if (s) {
+        // Wrapper = output frame; overflow: hidden clips any
+        // transform-overflow at the output bounds.
+        Object.assign(s.wrapper.style, {
+          left: `${outRect.x}px`,
+          top: `${outRect.y}px`,
+          width: `${outRect.w}px`,
+          height: `${outRect.h}px`,
+        });
         const t = getEffectiveTransform(clip, this.timeMs - clip.start);
-        // Translate first, then scale (around the element's center
-        // because of `transform-origin: 50% 50%` which is the CSS
-        // default).
-        v.style.transform = `translate(${t.x.toFixed(2)}px, ${t.y.toFixed(2)}px) scale(${t.scale.toFixed(4)})`;
+        // Identity = video fills wrapper exactly. Translate + scale
+        // move it within the wrapper; overflow clips.
+        s.video.style.transform = `translate(${t.x.toFixed(2)}px, ${t.y.toFixed(2)}px) scale(${t.scale.toFixed(4)})`;
       }
     }
-    // Inactive videos: keep them at identity so an old transform from
-    // a previous clip doesn't ghost through when we swap back to them.
-    for (const [id, v] of this.videos) {
+    // Inactive sources: reset transforms so stale state doesn't ghost
+    // when we swap back to them.
+    for (const [id, s] of this.sources) {
       if (clip && id === clip.sourceId) continue;
-      if (v.style.transform) v.style.transform = "";
+      if (s.video.style.transform) s.video.style.transform = "";
     }
   }
 
@@ -206,13 +233,13 @@ export class HtmlVideoEngine implements PlaybackEngine {
       cancelAnimationFrame(this.transformRaf);
       this.transformRaf = null;
     }
-    for (const v of this.videos.values()) {
-      v.pause();
-      v.removeAttribute("src");
-      v.load();
-      v.remove();
+    for (const s of this.sources.values()) {
+      s.video.pause();
+      s.video.removeAttribute("src");
+      s.video.load();
+      s.wrapper.remove();
     }
-    this.videos.clear();
+    this.sources.clear();
     this.mount.remove();
   }
 
@@ -220,33 +247,46 @@ export class HtmlVideoEngine implements PlaybackEngine {
 
   private syncSources(): void {
     const wanted = new Set(this.project.sources.map((s) => s.id));
-    for (const [id, v] of this.videos) {
+    for (const [id, s] of this.sources) {
       if (!wanted.has(id)) {
-        v.pause();
-        v.remove();
-        this.videos.delete(id);
+        s.video.pause();
+        s.wrapper.remove();
+        this.sources.delete(id);
       }
     }
     for (const src of this.project.sources) {
       if (src.kind !== "video") continue;
-      if (this.videos.has(src.id)) continue;
+      if (this.sources.has(src.id)) continue;
+      const wrapper = document.createElement("div");
+      wrapper.className = "aicut-preview-clip";
+      Object.assign(wrapper.style, {
+        position: "absolute",
+        overflow: "hidden",
+        visibility: "hidden",
+        // Initial bounds — applyTransforms overrides each frame.
+        left: "0",
+        top: "0",
+        width: "0",
+        height: "0",
+      } satisfies Partial<CSSStyleDeclaration>);
+
       const v = document.createElement("video");
       v.preload = "auto";
-      // Intentionally no `crossOrigin` here. Setting it forces the
-      // browser to require CORS headers on the source, which most
-      // pre-existing video CDNs do not serve. Pure <video> playback
-      // works fine cross-origin without it — we'll only need it once
-      // the preview moves to a Canvas/WebGL compositor that has to
-      // read pixels back. Hosts that need it can override post-mount.
+      // No `crossOrigin` — would force CORS preflight that most CDNs
+      // don't serve. Pure <video> playback works cross-origin without.
       v.playsInline = true;
       v.muted = false;
       v.src = src.url;
-      v.style.position = "absolute";
-      v.style.inset = "0";
-      v.style.width = "100%";
-      v.style.height = "100%";
-      v.style.objectFit = "contain";
-      v.style.visibility = "hidden";
+      Object.assign(v.style, {
+        position: "absolute",
+        inset: "0",
+        width: "100%",
+        height: "100%",
+        objectFit: "fill",
+        // Transform origin at center so scale() scales around the
+        // video's centroid, not its top-left corner.
+        transformOrigin: "50% 50%",
+      } satisfies Partial<CSSStyleDeclaration>);
       const sourceId = src.id;
       v.addEventListener("error", () =>
         this.onError?.(new Error(`Failed to load ${src.url}`)),
@@ -258,8 +298,9 @@ export class HtmlVideoEngine implements PlaybackEngine {
           this.onSourceMetadata?.(sourceId, durMs);
         }
       });
-      this.mount.appendChild(v);
-      this.videos.set(src.id, v);
+      wrapper.appendChild(v);
+      this.mount.appendChild(wrapper);
+      this.sources.set(src.id, { wrapper, video: v });
     }
   }
 
@@ -268,26 +309,26 @@ export class HtmlVideoEngine implements PlaybackEngine {
     if (this.currentClipId) {
       const prev = this.clipById(this.currentClipId);
       if (prev) {
-        const v = this.videos.get(prev.sourceId);
-        if (v) {
-          v.pause();
-          v.style.visibility = "hidden";
+        const s = this.sources.get(prev.sourceId);
+        if (s) {
+          s.video.pause();
+          s.wrapper.style.visibility = "hidden";
         }
       }
     }
     this.currentClipId = clip ? clip.id : null;
     if (clip) {
-      const v = this.videos.get(clip.sourceId);
-      if (v) v.style.visibility = "visible";
+      const s = this.sources.get(clip.sourceId);
+      if (s) s.wrapper.style.visibility = "visible";
     }
   }
 
   private seekVideoToClipOffset(clip: Clip, offsetMs: Ms): void {
-    const v = this.videos.get(clip.sourceId);
-    if (!v) return;
+    const s = this.sources.get(clip.sourceId);
+    if (!s) return;
     const target = (clip.in + Math.max(0, offsetMs)) / 1000;
-    if (Math.abs(v.currentTime - target) > 0.05) {
-      v.currentTime = target;
+    if (Math.abs(s.video.currentTime - target) > 0.05) {
+      s.video.currentTime = target;
     }
   }
 
@@ -301,10 +342,7 @@ export class HtmlVideoEngine implements PlaybackEngine {
   /**
    * Find the clip whose timeline range contains `timeMs`, searching
    * across ALL video tracks. If multiple tracks have a clip at this
-   * moment, the lowest-index track wins (matches the "Track 1 is
-   * background" convention used in the auto-split UX — overlapping
-   * placements would have created a new track on top, but here we
-   * fall back to the underlying clip).
+   * moment, the lowest-index track wins.
    */
   private clipAtTime(timeMs: Ms): Clip | null {
     for (const t of this.project.tracks) {
@@ -373,14 +411,13 @@ export class HtmlVideoEngine implements PlaybackEngine {
     }
     const clip = this.clipAtTime(this.timeMs);
     if (!clip) {
-      // Gap — jump forward to the next clip on any track.
       const next = this.nextClipAfterTime(this.timeMs);
       if (next) {
         this.timeMs = next.start;
         this.activate(next);
         this.seekVideoToClipOffset(next, 0);
-        const v = this.videos.get(next.sourceId);
-        if (v) void v.play().catch((err) => this.onError?.(err as Error));
+        const s = this.sources.get(next.sourceId);
+        if (s) void s.video.play().catch((err) => this.onError?.(err as Error));
       } else {
         this.pause();
         this.onEnded?.();
@@ -389,8 +426,8 @@ export class HtmlVideoEngine implements PlaybackEngine {
     } else if (clip.id !== this.currentClipId) {
       this.activate(clip);
       this.seekVideoToClipOffset(clip, this.timeMs - clip.start);
-      const v = this.videos.get(clip.sourceId);
-      if (v) void v.play().catch((err) => this.onError?.(err as Error));
+      const s = this.sources.get(clip.sourceId);
+      if (s) void s.video.play().catch((err) => this.onError?.(err as Error));
     }
     this.onTimeUpdate?.(this.timeMs);
   }

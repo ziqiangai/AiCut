@@ -208,6 +208,11 @@ export interface EditorApi {
   getActiveFrameRect():
     | { x: number; y: number; w: number; h: number }
     | null;
+  /** Output frame rect (fixed bounds, no transform). The overlay
+   *  draws the dashed border here. */
+  getActiveOutputFrameRect():
+    | { x: number; y: number; w: number; h: number }
+    | null;
   /**
    * Add a keyframe to a clip. Defaults: `time` = playhead in clip-local
    * coords (clamped to [0, clipDuration]); `x / y / scale` = the values
@@ -959,6 +964,19 @@ export class Editor implements EditorApi {
     | { x: number; y: number; w: number; h: number }
     | null {
     return this.engine.getFrameRect?.() ?? null;
+  }
+
+  /**
+   * Screen-space CSS-pixel rect of the OUTPUT FRAME (the fixed
+   * stage that clips the rendered video). Different from
+   * `getActiveFrameRect` which includes the keyframe transform —
+   * this one stays put as the user drags / scales the content.
+   * Used by the overlay to anchor the dashed border + drag body.
+   */
+  getActiveOutputFrameRect():
+    | { x: number; y: number; w: number; h: number }
+    | null {
+    return this.engine.getOutputFrameRect?.() ?? null;
   }
 
   setKeyframesEnabled(enabled: boolean): void {

@@ -48,8 +48,14 @@ export class CanvasCompositorEngine implements PlaybackEngine {
   private rafHandle: number | null = null;
   private lastFrameTs = 0;
   private paintedFrames = 0;
-  /** Last paint's CSS-pixel rect (relative to host). Updated on each
-   *  paint(); read by getFrameRect for the keyframe editing overlay. */
+  /** Output frame rect (no transform) — fixed bounds. */
+  private lastOutputRect: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  } | null = null;
+  /** Post-transform content rect. */
   private lastFrameRect: {
     x: number;
     y: number;
@@ -387,14 +393,26 @@ export class CanvasCompositorEngine implements PlaybackEngine {
       // scaled pixels, so multiply by DPR before translating.
       const dpr = window.devicePixelRatio || 1;
       const t = getEffectiveTransform(clip, this.timeMs - clip.start);
+      // Output frame in canvas pixels — fixed bounds we clip to so
+      // PiP / pan / zoom show the letterbox bg, not the editor chrome.
+      const outX = (cw - dw) / 2;
+      const outY = (ch - dh) / 2;
       this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.rect(outX, outY, dw, dh);
+      this.ctx.clip();
       this.ctx.translate(cx + t.x * dpr, cy + t.y * dpr);
       this.ctx.scale(t.scale, t.scale);
       this.ctx.drawImage(v, -dw / 2, -dh / 2, dw, dh);
       this.ctx.restore();
       this.paintedFrames += 1;
-      // Stash the post-transform frame rect in CSS pixels for the
-      // keyframe editing overlay.
+      // CSS-pixel rects for the overlay.
+      this.lastOutputRect = {
+        x: outX / dpr,
+        y: outY / dpr,
+        w: dw / dpr,
+        h: dh / dpr,
+      };
       const cssCx = cw / (2 * dpr) + t.x;
       const cssCy = ch / (2 * dpr) + t.y;
       const cssW = (dw * t.scale) / dpr;
@@ -407,8 +425,15 @@ export class CanvasCompositorEngine implements PlaybackEngine {
       };
     } else {
       this.lastFrameRect = null;
+      this.lastOutputRect = null;
     }
     this.updateBadge();
+  }
+
+  getOutputFrameRect():
+    | { x: number; y: number; w: number; h: number }
+    | null {
+    return this.lastOutputRect;
   }
 
   getFrameRect(): { x: number; y: number; w: number; h: number } | null {

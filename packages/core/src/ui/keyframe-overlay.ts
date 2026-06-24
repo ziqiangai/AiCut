@@ -151,11 +151,13 @@ export class KeyframeOverlay {
     if (!ctx) return;
     e.preventDefault();
     e.stopPropagation();
-    const rect = this.editor.getActiveFrameRect();
+    // Scale around the OUTPUT frame center, not the content center
+    // — that way dragging a handle outward grows the content
+    // symmetrically around the stage even if it's already translated.
+    const rect = this.editor.getActiveOutputFrameRect()
+      ?? this.editor.getActiveFrameRect();
     if (!rect) return;
     const hostRect = this.host.getBoundingClientRect();
-    // Frame center in client coords (so distance math works without
-    // converting back through the host every move).
     const cx = hostRect.left + rect.x + rect.w / 2;
     const cy = hostRect.top + rect.y + rect.h / 2;
     const startDist = Math.hypot(e.clientX - cx, e.clientY - cy);
@@ -238,22 +240,33 @@ export class KeyframeOverlay {
       this.root.style.display = "none";
       return;
     }
-    const rect = this.editor.getActiveFrameRect();
-    if (!rect) {
+    // Output rect = the FIXED stage where the video gets clipped.
+    // The dashed border + the body drag-target are anchored here so
+    // they don't move with the keyframe transform — they represent
+    // the export bounds, not the content position.
+    const outRect = this.editor.getActiveOutputFrameRect();
+    // Content rect = where the video pixels currently land (after
+    // transform). Scale handles attach to its corners so they
+    // visually grow / shrink WITH the video as you drag them.
+    const contentRect =
+      this.editor.getActiveFrameRect() ?? outRect;
+    if (!outRect) {
       this.root.style.display = "none";
       return;
     }
     this.root.style.display = "block";
-    const left = `${rect.x}px`;
-    const top = `${rect.y}px`;
-    const w = `${rect.w}px`;
-    const h = `${rect.h}px`;
-    Object.assign(this.frameBody.style, { left, top, width: w, height: h });
+    Object.assign(this.frameBody.style, {
+      left: `${outRect.x}px`,
+      top: `${outRect.y}px`,
+      width: `${outRect.w}px`,
+      height: `${outRect.h}px`,
+    });
     const halfHandle = 6; // visible 12×12 px
-    const fbLeft = rect.x;
-    const fbTop = rect.y;
-    const fbRight = rect.x + rect.w;
-    const fbBottom = rect.y + rect.h;
+    const r = contentRect ?? outRect;
+    const fbLeft = r.x;
+    const fbTop = r.y;
+    const fbRight = r.x + r.w;
+    const fbBottom = r.y + r.h;
     const place = (
       el: HTMLDivElement,
       cx: number,
