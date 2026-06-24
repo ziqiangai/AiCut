@@ -35,6 +35,35 @@ export interface Locale {
   /** Toolbar tooltip — jump the playhead to the selected clip's end. */
   seekClipEnd: string;
 
+  // Keyframe panel chrome
+  /** Header text on the keyframe parameter panel. */
+  keyframePanelTitle: string;
+  /** Row label for the X-translation numeric input. */
+  keyframePanelLabelX: string;
+  /** Row label for the Y-translation numeric input. */
+  keyframePanelLabelY: string;
+  /** Row label for the scale numeric input. */
+  keyframePanelLabelScale: string;
+  /** Row label for the easing dropdown. */
+  keyframePanelLabelEasing: string;
+  /** Reset button label — pins this kf to identity (0, 0, 1). */
+  keyframePanelReset: string;
+  /** Reset button tooltip. */
+  keyframePanelResetTitle: string;
+  /** Badge tooltip — kf for THIS prop is pinned at this moment. */
+  keyframePanelBadgePinned: string;
+  /** Badge tooltip — prop has kfs elsewhere but not at this moment. */
+  keyframePanelBadgeAnimated: string;
+  /** Badge tooltip — prop has no kfs (riding the static base). */
+  keyframePanelBadgeStatic: string;
+  /** Time display suffix — appended after the seconds value. */
+  keyframePanelTimeSuffix: string;
+  // Easing dropdown options (curve names)
+  keyframeEasingLinear: string;
+  keyframeEasingEaseIn: string;
+  keyframeEasingEaseOut: string;
+  keyframeEasingEaseInOut: string;
+
   // Fullscreen exit overlay
   exitFullscreen: string;
   exitFullscreenTitle: string;
@@ -67,6 +96,22 @@ export const localeEn: Locale = {
   keyframeRemove: "Remove keyframe at playhead",
   seekClipStart: "Jump to clip start (I)",
   seekClipEnd: "Jump to clip end (O)",
+  keyframePanelTitle: "Keyframe",
+  keyframePanelLabelX: "X",
+  keyframePanelLabelY: "Y",
+  keyframePanelLabelScale: "Scale",
+  keyframePanelLabelEasing: "Easing",
+  keyframePanelReset: "Reset to 0 0 1",
+  keyframePanelResetTitle:
+    "Pin this keyframe to identity (panX=0, panY=0, scale=1)",
+  keyframePanelBadgePinned: "Pinned at this moment",
+  keyframePanelBadgeAnimated: "Animated — but not pinned at this exact moment",
+  keyframePanelBadgeStatic: "Static value",
+  keyframePanelTimeSuffix: "s",
+  keyframeEasingLinear: "Linear",
+  keyframeEasingEaseIn: "Ease in",
+  keyframeEasingEaseOut: "Ease out",
+  keyframeEasingEaseInOut: "Ease in-out",
   exitFullscreen: "Exit fullscreen",
   exitFullscreenTitle: "Exit fullscreen (Esc)",
   newTrack: "+ New track",
@@ -93,6 +138,22 @@ export const localeZh: Locale = {
   keyframeRemove: "删除当前关键帧",
   seekClipStart: "跳到片段起点 (I)",
   seekClipEnd: "跳到片段末尾 (O)",
+  keyframePanelTitle: "关键帧",
+  keyframePanelLabelX: "X 位移",
+  keyframePanelLabelY: "Y 位移",
+  keyframePanelLabelScale: "缩放",
+  keyframePanelLabelEasing: "缓动",
+  keyframePanelReset: "重置为 0 0 1",
+  keyframePanelResetTitle:
+    "将该关键帧重置为初始姿态（panX=0, panY=0, scale=1）",
+  keyframePanelBadgePinned: "已在该时刻固定",
+  keyframePanelBadgeAnimated: "整段有动画，但当前时刻没有锁点",
+  keyframePanelBadgeStatic: "未动画（沿用静态值）",
+  keyframePanelTimeSuffix: "秒",
+  keyframeEasingLinear: "线性",
+  keyframeEasingEaseIn: "缓入",
+  keyframeEasingEaseOut: "缓出",
+  keyframeEasingEaseInOut: "缓入缓出",
   exitFullscreen: "退出全屏",
   exitFullscreenTitle: "退出全屏 (Esc)",
   newTrack: "+ 新轨道",

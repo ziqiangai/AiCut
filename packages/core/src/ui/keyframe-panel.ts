@@ -1,4 +1,5 @@
 import type { Editor } from "../editor.js";
+import type { Locale } from "../i18n.js";
 import {
   getEffectiveTransform,
   hasKeyframesForProp,
@@ -6,12 +7,24 @@ import {
 } from "../keyframes/index.js";
 import type { Clip, EasingKind, Keyframe, KeyframeProp } from "../types.js";
 
-const EASING_OPTIONS: Array<{ value: EasingKind; label: string }> = [
-  { value: "linear", label: "Linear" },
-  { value: "easeIn", label: "Ease in" },
-  { value: "easeOut", label: "Ease out" },
-  { value: "easeInOut", label: "Ease in-out" },
+const EASING_VALUES: EasingKind[] = [
+  "linear",
+  "easeIn",
+  "easeOut",
+  "easeInOut",
 ];
+function easingLabel(value: EasingKind, locale: Locale): string {
+  switch (value) {
+    case "linear":
+      return locale.keyframeEasingLinear;
+    case "easeIn":
+      return locale.keyframeEasingEaseIn;
+    case "easeOut":
+      return locale.keyframeEasingEaseOut;
+    case "easeInOut":
+      return locale.keyframeEasingEaseInOut;
+  }
+}
 
 const TIME_EPS_MS = 16;
 
@@ -28,16 +41,21 @@ const TIME_EPS_MS = 16;
  */
 export class KeyframePanel {
   private editor: Editor;
+  private locale: Locale;
   readonly root: HTMLDivElement;
   private inputs: Record<KeyframeProp, HTMLInputElement>;
   private kfBadges: Record<KeyframeProp, HTMLSpanElement>;
   private timeLabel: HTMLSpanElement;
+  private titleLabel!: HTMLSpanElement;
   private resetBtn: HTMLButtonElement;
   private easingSelect!: HTMLSelectElement;
+  private easingLabelEl!: HTMLLabelElement;
+  private rowLabels!: Record<KeyframeProp, HTMLLabelElement>;
   private lastSyncKey = "";
 
-  constructor(host: HTMLElement, editor: Editor) {
+  constructor(host: HTMLElement, editor: Editor, locale: Locale) {
     this.editor = editor;
+    this.locale = locale;
 
     this.root = document.createElement("div");
     this.root.className = "aicut-keyframe-panel";
@@ -48,17 +66,24 @@ export class KeyframePanel {
 
     const title = document.createElement("div");
     title.className = "aicut-keyframe-panel__title";
-    const titleLabel = document.createElement("span");
-    titleLabel.textContent = "Keyframe";
+    this.titleLabel = document.createElement("span");
     this.timeLabel = document.createElement("span");
     this.timeLabel.className = "aicut-keyframe-panel__time";
-    title.append(titleLabel, this.timeLabel);
+    title.append(this.titleLabel, this.timeLabel);
     this.root.appendChild(title);
 
+    const xRow = this.makeRow("kf-x", "panX", 1);
+    const yRow = this.makeRow("kf-y", "panY", 1);
+    const scaleRow = this.makeRow("kf-scale", "scale", 0.05);
     this.inputs = {
-      panX: this.makeRow("X", "kf-x", "panX", 1),
-      panY: this.makeRow("Y", "kf-y", "panY", 1),
-      scale: this.makeRow("Scale", "kf-scale", "scale", 0.05),
+      panX: xRow.input,
+      panY: yRow.input,
+      scale: scaleRow.input,
+    };
+    this.rowLabels = {
+      panX: xRow.label,
+      panY: yRow.label,
+      scale: scaleRow.label,
     };
     this.kfBadges = {
       panX: this.makeBadge(this.inputs.panX),
@@ -71,18 +96,16 @@ export class KeyframePanel {
     const easingRow = document.createElement("div");
     easingRow.className =
       "aicut-keyframe-panel__row aicut-keyframe-panel__row--easing";
-    const easingLab = document.createElement("label");
-    easingLab.textContent = "Easing";
+    this.easingLabelEl = document.createElement("label");
     this.easingSelect = document.createElement("select");
     this.easingSelect.setAttribute("data-testid", "aicut-kf-easing");
-    for (const opt of EASING_OPTIONS) {
+    for (const value of EASING_VALUES) {
       const o = document.createElement("option");
-      o.value = opt.value;
-      o.textContent = opt.label;
+      o.value = value;
       this.easingSelect.appendChild(o);
     }
     this.easingSelect.addEventListener("change", () => this.onEasingChange());
-    easingRow.append(easingLab, this.easingSelect);
+    easingRow.append(this.easingLabelEl, this.easingSelect);
     this.root.appendChild(easingRow);
 
     const actions = document.createElement("div");
@@ -91,14 +114,37 @@ export class KeyframePanel {
     this.resetBtn.type = "button";
     this.resetBtn.className = "aicut-keyframe-panel__reset";
     this.resetBtn.setAttribute("data-testid", "aicut-keyframe-reset");
-    this.resetBtn.textContent = "Reset to 0 0 1";
-    this.resetBtn.title =
-      "Pin this keyframe to identity (panX=0, panY=0, scale=1)";
     this.resetBtn.addEventListener("click", () => this.onReset());
     actions.appendChild(this.resetBtn);
     this.root.appendChild(actions);
 
+    // Paint all locale-driven text up front. setLocale() reuses this.
+    this.applyLocaleText();
+
     host.appendChild(this.root);
+  }
+
+  setLocale(locale: Locale): void {
+    this.locale = locale;
+    this.applyLocaleText();
+    // Force a render so the time-suffix / badge tooltips also refresh
+    // (those are written inside render()'s value path).
+    this.lastSyncKey = "";
+    this.render();
+  }
+
+  private applyLocaleText(): void {
+    this.titleLabel.textContent = this.locale.keyframePanelTitle;
+    this.rowLabels.panX.textContent = this.locale.keyframePanelLabelX;
+    this.rowLabels.panY.textContent = this.locale.keyframePanelLabelY;
+    this.rowLabels.scale.textContent = this.locale.keyframePanelLabelScale;
+    this.easingLabelEl.textContent = this.locale.keyframePanelLabelEasing;
+    this.resetBtn.textContent = this.locale.keyframePanelReset;
+    this.resetBtn.title = this.locale.keyframePanelResetTitle;
+    // Re-label each existing easing <option> in the dropdown.
+    for (const opt of Array.from(this.easingSelect.options)) {
+      opt.textContent = easingLabel(opt.value as EasingKind, this.locale);
+    }
   }
 
   destroy(): void {
@@ -158,7 +204,7 @@ export class KeyframePanel {
     this.setIfBlur(this.inputs.panX, String(Math.round(v.panX)));
     this.setIfBlur(this.inputs.panY, String(Math.round(v.panY)));
     this.setIfBlur(this.inputs.scale, v.scale.toFixed(2));
-    this.timeLabel.textContent = `${(time / 1000).toFixed(2)}s`;
+    this.timeLabel.textContent = `${(time / 1000).toFixed(2)}${this.locale.keyframePanelTimeSuffix}`;
     if (this.easingSelect.value !== sharedEasing) {
       this.easingSelect.value = sharedEasing;
     }
@@ -179,10 +225,10 @@ export class KeyframePanel {
         pinned,
       );
       this.kfBadges[p].title = pinned
-        ? "Pinned at this moment"
+        ? this.locale.keyframePanelBadgePinned
         : animated
-          ? "Animated — but not pinned at this exact moment"
-          : "Static value";
+          ? this.locale.keyframePanelBadgeAnimated
+          : this.locale.keyframePanelBadgeStatic;
     }
     // Reset enabled when we have a clip + time to write into.
     this.resetBtn.disabled = false;
@@ -191,15 +237,13 @@ export class KeyframePanel {
   // ---- internals ------------------------------------------------------
 
   private makeRow(
-    label: string,
     testId: string,
     prop: KeyframeProp,
     step: number,
-  ): HTMLInputElement {
+  ): { input: HTMLInputElement; label: HTMLLabelElement } {
     const row = document.createElement("div");
     row.className = "aicut-keyframe-panel__row";
     const lab = document.createElement("label");
-    lab.textContent = label;
     const input = document.createElement("input");
     input.type = "number";
     input.step = String(step);
@@ -210,7 +254,7 @@ export class KeyframePanel {
     });
     row.append(lab, input);
     this.root.appendChild(row);
-    return input;
+    return { input, label: lab };
   }
 
   private makeBadge(input: HTMLInputElement): HTMLSpanElement {

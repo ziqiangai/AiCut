@@ -154,7 +154,7 @@ export class EditorUI {
 
     // Keyframe panel — floats over the preview's left edge; visible
     // only when keyframes mode is on AND a keyframe is selected.
-    this.keyframePanel = new KeyframePanel(this.preview, editor);
+    this.keyframePanel = new KeyframePanel(this.preview, editor, locale);
     // Keyframe overlay — frame border + scale handles on top of the
     // preview; drives drag-to-translate and corner-handle-to-scale
     // gestures via direct manipulation. Hidden when keyframes off.
@@ -290,6 +290,7 @@ export class EditorUI {
     this.fullscreenExitBtn.title = locale.exitFullscreenTitle;
     this.fullscreenExitBtn.textContent = locale.exitFullscreen;
     this.timeline.setLocale(locale);
+    this.keyframePanel.setLocale(locale);
     this.render();
   }
 
