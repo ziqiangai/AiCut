@@ -165,18 +165,32 @@ export function drawAll(
   drawCoverageGaps(ctx, state, style);
   ctx.restore();
 
-  // --- Pass 5: Snap guide + playhead (scroll X, full visible track Y) -
+  // --- Pass 5: Snap guide only (playhead moves to the top layer) -----
   ctx.save();
   ctx.beginPath();
   ctx.rect(baseX, 0, trackAreaW, H - SCROLLBAR_THICKNESS);
   ctx.clip();
   drawSnapGuide(ctx, state, style);
-  drawPlayhead(ctx, state, style);
   ctx.restore();
 
   // --- Pass 6: Scrollbars (no clip — overlay at edges) ---------------
   drawScrollbarV(ctx, state, style);
   drawScrollbarH(ctx, state, style);
+
+  // --- Pass 7: Playhead — drawn LAST so it sits on top of every
+  // other layer (ruler ticks, scrollbar gutters, coverage tint).
+  // Clip excludes the header column but INCLUDES the left/right
+  // padding, so the time-bubble at t=0 can extend into the pad zone
+  // instead of being half-eaten by a tight clip anchored at baseX.
+  // The bubble itself is still clamped inside the playable area in
+  // drawPlayhead so it never crosses the header edge regardless.
+  const playheadLeft = state.showHeader ? HEADER_WIDTH : 0;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(playheadLeft, 0, W - playheadLeft, H);
+  ctx.clip();
+  drawPlayhead(ctx, state, style);
+  ctx.restore();
 }
 
 /**
