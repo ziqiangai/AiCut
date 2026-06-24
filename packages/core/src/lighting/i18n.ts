@@ -13,7 +13,6 @@ export interface LightingLocale {
   lightingRim: string;
   lightingViewPerspective: string;
   lightingViewFront: string;
-  lightingResetParams: string;
   // Six canonical key-light direction buttons
   lightingDirLeft: string;
   lightingDirRight: string;
@@ -32,7 +31,6 @@ export const lightingLocaleEn: LightingLocale = {
   lightingRim: "Rim light",
   lightingViewPerspective: "Perspective",
   lightingViewFront: "Front",
-  lightingResetParams: "Reset",
   lightingDirLeft: "Left",
   lightingDirRight: "Right",
   lightingDirTop: "Top",
@@ -50,7 +48,6 @@ export const lightingLocaleZh: LightingLocale = {
   lightingRim: "轮廓光",
   lightingViewPerspective: "透视",
   lightingViewFront: "正面",
-  lightingResetParams: "重置参数",
   lightingDirLeft: "左侧",
   lightingDirRight: "右侧",
   lightingDirTop: "顶部",

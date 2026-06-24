@@ -144,7 +144,9 @@ editor.toolbarRight.appendChild(exportBtn);
 
 ## Lighting picker (opt-in sub-entry)
 
-A separate component for AI relighting workflows — drag a light dot around a 3D sphere wrapping a subject frame, control brightness / color / direction. Three.js is bundled only on this sub-entry, so consumers of the video editor pay zero bytes for it.
+A separate component for AI-relighting workflows — drag a light dot around a 3D sphere wrapping a subject frame, control brightness / color / direction. Three.js is bundled only on this sub-entry, so consumers of the video editor pay zero bytes for it.
+
+The library renders **only the picker** (scene + controls). Smart-mode UI (prompt textarea, preset thumbnails, Generate button, close handling) is host code laid out beside `<LightingEditor>`.
 
 ```ts
 import { LightingEditor } from "@aicut/core/lighting";
@@ -153,23 +155,31 @@ import "@aicut/core/styles.css";
 const ed = LightingEditor.create({
   container: document.getElementById("light")!,
   subjectImageUrl: "/frames/subject.jpg",
-  smartEnabled: true,        // default; false → no slot column at all
-  smartOpen: true,           // default; user can toggle via × / header pill
   onChange: (cfg) => console.log(cfg),
-  onGenerate: (cfg) => fetch("/relight", { method: "POST", body: JSON.stringify(cfg) }),
 });
 
-// Host appends UI into the smart slot (prompt textarea, presets, generate btn, …).
-ed.smartSlot.appendChild(myAiUI);
-
-// Runtime control:
-ed.setSmartOpen(false);
-ed.setSmartEnabled(false);
+// Runtime control
 ed.setView("front");
 ed.setConfig({ brightness: 0.8, color: "#ffaa3a" });
+ed.setSubjectImage("/frames/another-subject.jpg");
+ed.reset();                  // restore safe defaults
+
+// Footer slot — the only DOM region the library leaves for host action
+// buttons (Reset, Generate, save-preset, etc.). Library renders nothing
+// into it; host appends whatever it wants:
+const resetBtn = document.createElement("button");
+resetBtn.textContent = "Reset";
+resetBtn.onclick = () => ed.reset();
+ed.controlsFooter.appendChild(resetBtn);
+
+// Host snapshot for "Generate" — call from your own button
+function onGenerate() {
+  const cfg = ed.getConfig();
+  fetch("/relight", { method: "POST", body: JSON.stringify(cfg) });
+}
 ```
 
-Locale extension `LightingLocale` (separate from the video editor's `Locale`) is also exported with `lightingLocaleEn` / `lightingLocaleZh`.
+Locale extension `LightingLocale` (separate from the video editor's `Locale`) is exported with `lightingLocaleEn` / `lightingLocaleZh`.
 
 ## Standalone Timeline
 

@@ -313,6 +313,23 @@ body,
   justify-content: space-between;
 }
 
+/* Reset button host-rendered into the editor's controlsFooter slot. */
+.ldemo-controls-footer-btn {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--aicut-controls-border, rgba(255, 255, 255, 0.08));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--aicut-controls-text, rgba(255, 255, 255, 0.85));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.ldemo-controls-footer-btn:hover {
+  background: var(--aicut-controls-hover, rgba(255, 255, 255, 0.08));
+}
+
 .ldemo-smart-close {
   width: 24px;
   height: 24px;

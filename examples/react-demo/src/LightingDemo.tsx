@@ -105,6 +105,16 @@ export function LightingDemo() {
             locale={locale}
             theme={theme}
             onChange={(cfg) => setConfig(cfg)}
+            controlsFooter={
+              <button
+                type="button"
+                className="ldemo-controls-footer-btn"
+                data-testid="ldemo-reset"
+                onClick={() => apiRef.current?.reset()}
+              >
+                Reset
+              </button>
+            }
           />
           {smartOpen ? (
             <aside className="ldemo-smart-panel" data-testid="ldemo-smart-panel">

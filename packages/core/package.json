@@ -1,6 +1,6 @@
 {
   "name": "@aicut/core",
-  "version": "0.3.0",
+  "version": "0.4.1",
   "description": "Framework-agnostic core for the AiCut video editor — canvas timeline, data model, HTML5 playback engine, plus an opt-in 3D lighting picker.",
   "license": "MIT",
   "author": "ziqiang <ziqiangytu@gmail.com>",

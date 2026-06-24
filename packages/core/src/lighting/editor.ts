@@ -34,6 +34,10 @@ export class LightingEditor {
   private controls: LightingControls;
   private sceneViewport: HTMLDivElement;
   private viewToggleEl: HTMLDivElement;
+  /** Footer slot in the controls column. Host appends Reset/Generate/
+   *  preset-save/etc. buttons here. The library renders nothing into
+   *  it — it's the same convention as the video editor's toolbar slots. */
+  readonly controlsFooter: HTMLDivElement;
 
   private resizeObs: ResizeObserver | null = null;
   private destroyed = false;
@@ -81,9 +85,9 @@ export class LightingEditor {
           keyPreset: preset,
         }),
       onRimToggle: (on) => this.applyMutation({ rim: on }),
-      onReset: () => this.setConfig(DEFAULT_LIGHTING_CONFIG, "reset"),
     });
     body.appendChild(this.controls.root);
+    this.controlsFooter = this.controls.footerSlot;
 
     // ---- Scene mount ----
     this.scene = new LightingScene(this.sceneViewport, this.view);
@@ -139,6 +143,12 @@ export class LightingEditor {
   setSubjectImage(url: string): void {
     this.opts.subjectImageUrl = url;
     this.scene.setSubjectImage(url);
+  }
+
+  /** Restore config to the safe defaults. Convenience for host's
+   *  "Reset" button — equivalent to `setConfig(DEFAULT_LIGHTING_CONFIG)`. */
+  reset(): void {
+    this.setConfig(DEFAULT_LIGHTING_CONFIG, "reset");
   }
 
   setView(v: LightingView): void {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, useTemplateRef, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from "vue";
 import {
   LightingEditor as CoreLightingEditor,
   type LightingConfig,
@@ -8,12 +8,6 @@ import {
 } from "@aicut/core/lighting";
 import type { Theme } from "@aicut/core";
 
-/**
- * Vue 3 shell for the 3D lighting picker. Renders scene + controls;
- * nothing else. Host code lays out their own surrounding UI (smart
- * mode panel, generate button, etc.) alongside this component in
- * their own template.
- */
 const props = defineProps<{
   subjectImageUrl?: string;
   defaultConfig?: Partial<LightingConfig>;
@@ -29,6 +23,11 @@ const emit = defineEmits<{
 
 const host = useTemplateRef<HTMLDivElement>("host");
 let editor: CoreLightingEditor | null = null;
+/**
+ * Footer slot DOM node — set after mount so the Teleport target
+ * exists before Vue tries to portal slot content into it.
+ */
+const footerSlot = ref<HTMLElement | null>(null);
 
 onMounted(() => {
   if (!host.value) return;
@@ -41,6 +40,7 @@ onMounted(() => {
     locale: props.locale,
     onChange: (cfg) => emit("change", cfg),
   });
+  footerSlot.value = editor.controlsFooter;
   emit("ready", editor);
 });
 
@@ -66,6 +66,7 @@ watch(
 onBeforeUnmount(() => {
   editor?.destroy();
   editor = null;
+  footerSlot.value = null;
 });
 
 defineExpose({
@@ -74,5 +75,9 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="host" data-aicut-lighting-host="" />
+  <div ref="host" data-aicut-lighting-host="">
+    <Teleport v-if="footerSlot" :to="footerSlot">
+      <slot name="controlsFooter" />
+    </Teleport>
+  </div>
 </template>

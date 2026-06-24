@@ -429,7 +429,7 @@
 
 .aicut-lighting-editor {
   --aicut-lighting-canvas-bg: color-mix(in srgb, var(--aicut-controls-text, rgba(255, 255, 255, 0.85)) 4%, transparent);
-  --aicut-lighting-section-gap: 14px;
+  --aicut-lighting-section-gap: 18px;
   --aicut-lighting-control-w: 220px;
   display: block;
 }
@@ -440,9 +440,9 @@
      render an adjacent panel (AI smart mode, prompt, presets, …) put
      their own DOM beside <LightingEditor> in their own layout. */
   grid-template-columns: 240px 220px;
-  gap: 16px;
+  gap: 28px;
   align-items: start;
-  padding: 16px;
+  padding: 24px;
   background: var(--aicut-controls-bg, #1f1f22);
   color: var(--aicut-controls-text, rgba(255, 255, 255, 0.85));
   border-radius: var(--aicut-radius-md, 12px);
@@ -453,9 +453,9 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   /* Self-center vertically so the sphere stays at the visual midpoint
-     of the row even when the smart drawer stretches the row taller
+     of the row even when an adjacent host panel makes the row taller
      than the scene column's own content. */
   align-self: center;
 }
@@ -532,7 +532,7 @@
 .aicut-lighting-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 .aicut-lighting-section-row {
   flex-direction: row;
@@ -635,19 +635,20 @@
   left: 16px;
 }
 
-.aicut-lighting-reset {
-  margin-left: auto;
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid var(--aicut-controls-border, rgba(255, 255, 255, 0.08));
-  border-radius: 6px;
-  background: transparent;
-  color: var(--aicut-controls-text, rgba(255, 255, 255, 0.85));
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
+/* Host-controlled footer area where Reset / Generate / preset-save
+   buttons go. Library renders this empty div; the React wrapper's
+   `controlsFooter` prop / Vue's <slot name="controlsFooter"> portals
+   the host content in. */
+.aicut-lighting-controls-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 0;
+  margin-top: 4px;
 }
-.aicut-lighting-reset:hover {
-  background: var(--aicut-controls-hover, rgba(255, 255, 255, 0.08));
+.aicut-lighting-controls-footer:empty {
+  display: none;
 }
 

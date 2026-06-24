@@ -137,37 +137,54 @@ A 3D lighting director for AI relighting flows — separate sub-entry; three.js 
 ```vue
 <script setup lang="ts">
 import { ref } from "vue";
-import { LightingEditor, type LightingConfig } from "@aicut/vue/lighting";
+import {
+  LightingEditor,
+  type LightingConfig,
+} from "@aicut/vue/lighting";
+import type { LightingEditor as CoreLightingEditor } from "@aicut/core/lighting";
 import "@aicut/core/styles.css";
 
-const editor = ref<{ api(): any } | null>(null);
+const editor = ref<{ api(): CoreLightingEditor | null } | null>(null);
 
 function onChange(cfg: LightingConfig) {
   console.log(cfg);
 }
 
-function onGenerate(cfg: LightingConfig) {
-  fetch("/relight", { method: "POST", body: JSON.stringify(cfg) });
+function onGenerate() {
+  const cfg = editor.value?.api()?.getConfig();
+  if (cfg) fetch("/relight", { method: "POST", body: JSON.stringify(cfg) });
 }
 </script>
 
 <template>
-  <LightingEditor
-    ref="editor"
-    subject-image-url="/frames/subject.jpg"
-    smart-enabled
-    @change="onChange"
-    @generate="onGenerate"
-  >
-    <template #smart>
+  <!-- Library renders ONLY the picker; the Smart panel beside it is
+       host code in your own template. -->
+  <div style="display: flex; gap: 16px">
+    <LightingEditor
+      ref="editor"
+      subject-image-url="/frames/subject.jpg"
+      @change="onChange"
+    >
+      <!-- Reset / Generate / save-preset / etc. go into the controls
+           column's footer slot — the only host-supplied surface the
+           library reserves space for. -->
+      <template #controlsFooter>
+        <button @click="editor?.api()?.reset()">Reset</button>
+      </template>
+    </LightingEditor>
+    <aside>
       <textarea placeholder="Describe the mood…" />
-      <button @click="editor?.api()?.requestGenerate()">Generate</button>
-    </template>
-  </LightingEditor>
+      <button @click="onGenerate">Generate</button>
+    </aside>
+  </div>
 </template>
 ```
 
-Props: `subjectImageUrl`, `defaultConfig`, `defaultView`, `theme`, `locale`, `smartEnabled`, `smartOpen`. Events: `ready`, `change`, `generate`. Use the named `<slot name="smart">` for the smart-mode panel content.
+Props: `subjectImageUrl`, `defaultConfig`, `defaultView`, `theme`, `locale`. Slots: `controlsFooter`. Events: `ready`, `change`.
+
+Exposed API (`editor.api()`): `setConfig`, `getConfig`, `setSubjectImage`, `setView`, `setTheme`, `setLocale`, `reset`.
+
+The library is intentionally scoped to the picker — Smart mode UI / Generate buttons / layout live in host code.
 
 ## Standalone `<Timeline>`
 

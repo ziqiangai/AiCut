@@ -7,7 +7,6 @@ export interface ControlsCallbacks {
   onColorChange: (hex: string) => void;
   onKeyDirectionPick: (preset: Exclude<KeyPreset, "custom">) => void;
   onRimToggle: (on: boolean) => void;
-  onReset: () => void;
 }
 
 /**
@@ -21,6 +20,13 @@ export class LightingControls {
   /** Exposed so the editor can append host-level chrome (e.g. the
    *  Smart Mode toggle) without LightingControls knowing about it. */
   readonly headerSlot: HTMLDivElement;
+  /**
+   * Footer slot — sits where the built-in Reset used to live. Host
+   * appends any action buttons (Reset, Generate, Save preset, etc.)
+   * via the React wrapper's `controlsFooter` prop / Vue's
+   * `<slot name="controlsFooter">`. Library renders nothing here.
+   */
+  readonly footerSlot: HTMLDivElement;
 
   private brightnessInput: HTMLInputElement;
   private colorInput: HTMLInputElement;
@@ -34,7 +40,6 @@ export class LightingControls {
   private colorLabelEl: HTMLSpanElement;
   private keyLabelEl: HTMLSpanElement;
   private rimLabelEl: HTMLSpanElement;
-  private resetBtn: HTMLButtonElement;
 
   private locale: LightingLocale;
   private lastConfig: LightingConfig | null = null;
@@ -143,16 +148,13 @@ export class LightingControls {
     rimSection.appendChild(this.rimToggle);
     this.root.appendChild(rimSection);
 
-    // --- Reset row ---
-    const footer = mkDiv("aicut-lighting-section aicut-lighting-section-row");
-    this.resetBtn = document.createElement("button");
-    this.resetBtn.type = "button";
-    this.resetBtn.className = "aicut-lighting-reset";
-    this.resetBtn.textContent = locale.lightingResetParams;
-    this.resetBtn.setAttribute("data-testid", "aicut-lighting-reset");
-    this.resetBtn.addEventListener("click", () => cb.onReset());
-    footer.appendChild(this.resetBtn);
-    this.root.appendChild(footer);
+    // --- Footer slot ---
+    this.footerSlot = mkDiv("aicut-lighting-controls-footer");
+    this.footerSlot.setAttribute(
+      "data-testid",
+      "aicut-lighting-controls-footer",
+    );
+    this.root.appendChild(this.footerSlot);
   }
 
   /** Idempotent — mirror the given config into all visible controls. */
@@ -184,7 +186,6 @@ export class LightingControls {
     this.colorLabelEl.textContent = locale.lightingColor;
     this.keyLabelEl.textContent = locale.lightingKeyTitle;
     this.rimLabelEl.textContent = locale.lightingRim;
-    this.resetBtn.textContent = locale.lightingResetParams;
     // 6-way direction button labels.
     const dirLabels: Record<Exclude<KeyPreset, "custom">, keyof LightingLocale> = {
       left: "lightingDirLeft",

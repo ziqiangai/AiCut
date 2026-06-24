@@ -160,32 +160,41 @@ import "@aicut/core/styles.css";
 
 function Relight() {
   const apiRef = useRef<LightingEditorApi | null>(null);
+
+  const onGenerate = (): void => {
+    const cfg = apiRef.current?.getConfig();
+    if (cfg) fetch("/relight", { method: "POST", body: JSON.stringify(cfg) });
+  };
+
+  // Library renders ONLY the picker (scene + controls). Host lays out
+  // the Smart mode panel beside it in their own flex/grid.
   return (
-    <LightingEditor
-      apiRef={apiRef}
-      subjectImageUrl="/frames/subject.jpg"
-      smartEnabled
-      smartPanel={
-        <>
-          <textarea placeholder="Describe the mood…" />
-          <button onClick={() => apiRef.current?.requestGenerate()}>
-            Generate
-          </button>
-        </>
-      }
-      onChange={(cfg: LightingConfig) => console.log(cfg)}
-      onGenerate={(cfg) =>
-        fetch("/relight", {
-          method: "POST",
-          body: JSON.stringify(cfg),
-        })
-      }
-    />
+    <div style={{ display: "flex", gap: 16 }}>
+      <LightingEditor
+        apiRef={apiRef}
+        subjectImageUrl="/frames/subject.jpg"
+        onChange={(cfg: LightingConfig) => console.log(cfg)}
+        // Reset / Generate / save-preset / etc. buttons go into the
+        // controls column's footer slot — the only host-supplied
+        // surface the library reserves space for.
+        controlsFooter={
+          <button onClick={() => apiRef.current?.reset()}>Reset</button>
+        }
+      />
+      <aside>
+        <textarea placeholder="Describe the mood…" />
+        <button onClick={onGenerate}>Generate</button>
+      </aside>
+    </div>
   );
 }
 ```
 
-Props: `subjectImageUrl`, `defaultConfig`, `defaultView`, `theme`, `locale`, `smartEnabled`, `smartOpen`, `smartPanel`, `onChange`, `onGenerate`, `onSmartOpenChange`. The host's `smartPanel` is portaled into the editor's slot; the library renders the × close button + a "Smart mode" header pill to re-open it.
+Props: `subjectImageUrl`, `defaultConfig`, `defaultView`, `theme`, `locale`, `controlsFooter`, `onChange`.
+
+Imperative API (`apiRef.current`): `setConfig`, `getConfig`, `setSubjectImage`, `setView`, `getView`, `reset`.
+
+The library is intentionally focused on the picker — Smart mode UI, Generate buttons, close handling, layout all live in host code.
 
 ## Standalone `<Timeline>`
 

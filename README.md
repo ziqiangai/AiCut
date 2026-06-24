@@ -252,7 +252,7 @@ Each backend resolves an ffmpeg binary in this order:
 
 ## 💡 Lighting picker (opt-in)
 
-An independent 3D component for AI-relighting workflows. The host picks a frame, the picker shows it on a flat plane inside a wireframe sphere, and the user drags a light dot around the sphere surface to set direction. Brightness drives the cone-beam length; color tints the beam; a "Smart mode" drawer is a host-supplied slot (prompt, presets, generate button) the library renders with a × close + a header pill toggle to re-open.
+An independent 3D component for AI-relighting workflows. The picker shows the host-picked frame on a flat plane inside a wireframe sphere; the user drags a light dot around the surface to set direction. Brightness drives the cone-beam length; color tints the beam.
 
 Three.js powers the scene and ships only on the **`@aicut/core/lighting`** sub-entry — consumers of the video editor pay nothing for it.
 
@@ -262,25 +262,47 @@ Three.js powers the scene and ships only on the **`@aicut/core/lighting`** sub-e
 
 </div>
 
+The library renders **just the picker** (scene + controls). Smart-mode prompt, preset thumbnails, Generate button, close behaviour — all host code, laid out alongside `<LightingEditor>` in your own flex/grid:
+
 ```tsx
-import { LightingEditor } from "@aicut/react/lighting";
+import { useRef, useState } from "react";
+import { LightingEditor, type LightingEditorApi } from "@aicut/react/lighting";
 import "@aicut/core/styles.css";
 
-<LightingEditor
-  subjectImageUrl="/frames/subject.jpg"
-  smartEnabled
-  smartPanel={
-    <>
-      <textarea placeholder="Describe the lighting…" />
-      <button onClick={() => apiRef.current?.requestGenerate()}>Generate</button>
-    </>
-  }
-  onChange={(cfg) => console.log(cfg)}
-  onGenerate={(cfg) => fetch("/relight", { method: "POST", body: JSON.stringify(cfg) })}
-/>
+function Relight() {
+  const apiRef = useRef<LightingEditorApi | null>(null);
+  const [smartOpen, setSmartOpen] = useState(true);
+
+  const onGenerate = (): void => {
+    const cfg = apiRef.current?.getConfig();
+    if (cfg) fetch("/relight", { method: "POST", body: JSON.stringify(cfg) });
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 16 }}>
+      <LightingEditor
+        apiRef={apiRef}
+        subjectImageUrl="/frames/subject.jpg"
+        onChange={(cfg) => console.log(cfg)}
+        // Buttons rendered inside the controls column's footer slot
+        // — the only place the library leaves room for host actions.
+        controlsFooter={
+          <button onClick={() => apiRef.current?.reset()}>Reset</button>
+        }
+      />
+      {smartOpen && (
+        <aside>
+          <button onClick={() => setSmartOpen(false)}>×</button>
+          <textarea placeholder="Describe the lighting…" />
+          <button onClick={onGenerate}>Generate</button>
+        </aside>
+      )}
+    </div>
+  );
+}
 ```
 
-The full `LightingConfig` (brightness, color, key direction unit-vector, key preset, rim toggle) is plain JSON — same philosophy as the video editor's project.
+The full `LightingConfig` (brightness, color, key-direction unit vector, key preset, rim toggle) is plain JSON — same philosophy as the video editor's project.
 
 ---
 

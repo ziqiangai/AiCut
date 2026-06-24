@@ -4,8 +4,10 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
   type Ref,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   LightingEditor as CoreLightingEditor,
   type LightingConfig,
@@ -20,6 +22,8 @@ export interface LightingEditorApi {
   setSubjectImage(url: string): void;
   setView(v: LightingView): void;
   getView(): LightingView;
+  /** Convenience — restores config to safe defaults. */
+  reset(): void;
 }
 
 export interface LightingEditorProps {
@@ -34,6 +38,14 @@ export interface LightingEditorProps {
   /** Locale partial — reactive (calls editor.setLocale). */
   locale?: LightingEditorOptions["locale"];
 
+  /**
+   * Any React node — portaled into the editor's controls footer slot
+   * (where the built-in Reset button used to live). Hosts put their
+   * Reset / Generate / save-preset / etc. buttons here. Empty until
+   * populated; the library renders nothing into the slot.
+   */
+  controlsFooter?: ReactNode;
+
   className?: string;
   style?: CSSProperties;
   apiRef?: Ref<LightingEditorApi | null>;
@@ -43,17 +55,16 @@ export interface LightingEditorProps {
 
 /**
  * React shell for the 3D lighting picker. Renders scene + controls;
- * nothing else. Host code lays out their own surrounding UI (smart
- * mode panel, generate button, etc.) alongside this component in
- * whatever flex/grid the host prefers.
+ * the host owns everything else (smart panel beside, action buttons
+ * in the controlsFooter slot, layout, theming the surrounding page).
  */
 export function LightingEditor(props: LightingEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<CoreLightingEditor | null>(null);
-  // Triggers a re-render the moment the editor is created, so the
-  // useImperativeHandle factory below can return the real instance
-  // instead of locking at null forever (same trick as VideoEditor).
-  const [ready, setReady] = useState(false);
+  // Hold the footer slot DOM node in state so the portal mounts after
+  // editor creation. Same lifecycle dance VideoEditor does for its
+  // toolbar slots.
+  const [footerSlot, setFooterSlot] = useState<HTMLElement | null>(null);
 
   const cbRef = useRef(props);
   cbRef.current = props;
@@ -71,11 +82,11 @@ export function LightingEditor(props: LightingEditorProps) {
       onChange: (cfg) => cbRef.current.onChange?.(cfg),
     });
     editorRef.current = editor;
-    setReady(true);
+    setFooterSlot(editor.controlsFooter);
     return () => {
       editor.destroy();
       editorRef.current = null;
-      setReady(false);
+      setFooterSlot(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -84,8 +95,6 @@ export function LightingEditor(props: LightingEditorProps) {
     if (props.theme) editorRef.current?.setTheme(props.theme);
   }, [props.theme]);
   useEffect(() => {
-    // Always push — `undefined` is the "reset to English defaults"
-    // signal. Without this, toggling ZH→EN in the host kept ZH labels.
     editorRef.current?.setLocale(props.locale ?? {});
   }, [props.locale]);
   useEffect(() => {
@@ -104,9 +113,11 @@ export function LightingEditor(props: LightingEditorProps) {
         setSubjectImage: (url) => ed.setSubjectImage(url),
         setView: (v) => ed.setView(v),
         getView: () => ed.getView(),
+        reset: () => ed.reset(),
       };
     },
-    [ready],
+    // Keyed on footerSlot — same null-lock fix the VideoEditor uses.
+    [footerSlot],
   );
 
   return (
@@ -115,6 +126,10 @@ export function LightingEditor(props: LightingEditorProps) {
       className={props.className}
       style={props.style}
       data-aicut-lighting-host=""
-    />
+    >
+      {footerSlot && props.controlsFooter != null
+        ? createPortal(props.controlsFooter, footerSlot)
+        : null}
+    </div>
   );
 }
