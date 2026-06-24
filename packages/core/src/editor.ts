@@ -22,6 +22,7 @@ import { applyTheme } from "./theme.js";
 import { type Locale, mergeLocale } from "./i18n.js";
 import type {
   Clip,
+  EasingKind,
   Keyframe,
   KeyframeProp,
   MediaSource,
@@ -253,6 +254,28 @@ export interface EditorApi {
     clipId: string,
     keyframeId: string,
     value: number,
+  ): boolean;
+  /**
+   * Change one keyframe's outgoing easing curve. Shapes only the
+   * segment from this kf to the NEXT kf in time on the same prop.
+   * The kf's value is untouched.
+   */
+  setKeyframeEasing(
+    clipId: string,
+    keyframeId: string,
+    easing: EasingKind,
+  ): boolean;
+  /**
+   * Batch-set the outgoing easing on every kf at one moment in time
+   * (within the 16ms tolerance that the rest of the API uses) on a
+   * single clip. Mirrors the panel's "one dropdown for the moment"
+   * UX so all three props (panX / panY / scale) at the selected
+   * moment animate with the same curve. Single history entry.
+   */
+  setKeyframesEasingAtTime(
+    clipId: string,
+    timeMs: Ms,
+    easing: EasingKind,
   ): boolean;
   /**
    * CapCut-style auto-record: write `value` for `prop` at the playhead.
@@ -1180,6 +1203,51 @@ export class Editor implements EditorApi {
     if (Math.abs(kf.value - value) < 1e-9) return false;
     this.pushHistory();
     kf.value = value;
+    this.afterMutation();
+    return true;
+  }
+
+  setKeyframeEasing(
+    clipId: string,
+    keyframeId: string,
+    easing: EasingKind,
+  ): boolean {
+    const trk = findTrackOfClip(this.project, clipId);
+    const cl = trk?.clips.find((c) => c.id === clipId);
+    const kf = cl?.keyframes?.find((k) => k.id === keyframeId);
+    if (!trk || !cl || !kf) return false;
+    const current = kf.easing ?? "linear";
+    if (current === easing) return false;
+    this.pushHistory();
+    if (easing === "linear") {
+      // Strip the field rather than store the default — keeps the
+      // serialized project minimal for hosts that diff JSON.
+      delete kf.easing;
+    } else {
+      kf.easing = easing;
+    }
+    this.afterMutation();
+    return true;
+  }
+
+  setKeyframesEasingAtTime(
+    clipId: string,
+    timeMs: Ms,
+    easing: EasingKind,
+  ): boolean {
+    const trk = findTrackOfClip(this.project, clipId);
+    const cl = trk?.clips.find((c) => c.id === clipId);
+    if (!trk || !cl || !cl.keyframes) return false;
+    const t = Math.round(timeMs);
+    const matches = cl.keyframes.filter((k) => Math.abs(k.time - t) < 16);
+    if (matches.length === 0) return false;
+    const anyChange = matches.some((k) => (k.easing ?? "linear") !== easing);
+    if (!anyChange) return false;
+    this.pushHistory();
+    for (const kf of matches) {
+      if (easing === "linear") delete kf.easing;
+      else kf.easing = easing;
+    }
     this.afterMutation();
     return true;
   }

@@ -426,6 +426,58 @@ describe("Editor.keyframes — per-property mutators + history + selection", () 
     editor.destroy();
   });
 
+  it("setKeyframeEasing — round-trip, default strip, no-op when unchanged", () => {
+    const editor = Editor.create({
+      container,
+      project: tinyProject(),
+      playbackEngine: () => makeStubEngine(),
+    });
+    const id = editor.addKeyframe("c1", "scale", { time: 1000, value: 1 })!;
+    // Default is "linear" — implied by missing field.
+    expect(
+      editor.getProject().tracks[0]?.clips[0]?.keyframes?.[0]?.easing,
+    ).toBeUndefined();
+    // Set to easeIn.
+    expect(editor.setKeyframeEasing("c1", id, "easeIn")).toBe(true);
+    expect(
+      editor.getProject().tracks[0]?.clips[0]?.keyframes?.[0]?.easing,
+    ).toBe("easeIn");
+    // Setting the same value again is a no-op (no history bump).
+    expect(editor.setKeyframeEasing("c1", id, "easeIn")).toBe(false);
+    // Going back to linear STRIPS the field — keeps serialized
+    // project minimal (no `easing: "linear"` everywhere).
+    expect(editor.setKeyframeEasing("c1", id, "linear")).toBe(true);
+    expect(
+      editor.getProject().tracks[0]?.clips[0]?.keyframes?.[0]?.easing,
+    ).toBeUndefined();
+    editor.destroy();
+  });
+
+  it("setKeyframesEasingAtTime — batch on all 3 props at a moment in one history entry", () => {
+    const editor = Editor.create({
+      container,
+      project: tinyProject(),
+      playbackEngine: () => makeStubEngine(),
+    });
+    // Toolbar-style add: 3 kfs at the playhead.
+    editor.setSelection("c1");
+    editor.seek(1000);
+    editor.toggleKeyframeAtPlayhead();
+    expect(editor.getProject().tracks[0]?.clips[0]?.keyframes).toHaveLength(3);
+    expect(editor.setKeyframesEasingAtTime("c1", 1000, "easeOut")).toBe(true);
+    const after = editor.getProject().tracks[0]?.clips[0]?.keyframes ?? [];
+    for (const k of after) expect(k.easing).toBe("easeOut");
+    // ONE undo reverts all three.
+    editor.undo();
+    const reverted = editor.getProject().tracks[0]?.clips[0]?.keyframes ?? [];
+    for (const k of reverted) expect(k.easing).toBeUndefined();
+    // No-op when nothing changes.
+    expect(editor.setKeyframesEasingAtTime("c1", 1000, "linear")).toBe(false);
+    // No matching kfs at that time → returns false.
+    expect(editor.setKeyframesEasingAtTime("c1", 4500, "easeIn")).toBe(false);
+    editor.destroy();
+  });
+
   it("seekToClipEdge — start lands on clip.start; end lands 1ms inside so kf-toggle still finds the clip", () => {
     const editor = Editor.create({
       container,

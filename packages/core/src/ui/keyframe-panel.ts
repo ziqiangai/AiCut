@@ -4,7 +4,14 @@ import {
   hasKeyframesForProp,
   keyframesForProp,
 } from "../keyframes/index.js";
-import type { Clip, Keyframe, KeyframeProp } from "../types.js";
+import type { Clip, EasingKind, Keyframe, KeyframeProp } from "../types.js";
+
+const EASING_OPTIONS: Array<{ value: EasingKind; label: string }> = [
+  { value: "linear", label: "Linear" },
+  { value: "easeIn", label: "Ease in" },
+  { value: "easeOut", label: "Ease out" },
+  { value: "easeInOut", label: "Ease in-out" },
+];
 
 const TIME_EPS_MS = 16;
 
@@ -26,6 +33,7 @@ export class KeyframePanel {
   private kfBadges: Record<KeyframeProp, HTMLSpanElement>;
   private timeLabel: HTMLSpanElement;
   private resetBtn: HTMLButtonElement;
+  private easingSelect!: HTMLSelectElement;
   private lastSyncKey = "";
 
   constructor(host: HTMLElement, editor: Editor) {
@@ -57,6 +65,25 @@ export class KeyframePanel {
       panY: this.makeBadge(this.inputs.panY),
       scale: this.makeBadge(this.inputs.scale),
     };
+
+    // Easing — one dropdown applies to all three props at this moment.
+    // Shapes the curve from THIS moment to the next kf on each prop.
+    const easingRow = document.createElement("div");
+    easingRow.className =
+      "aicut-keyframe-panel__row aicut-keyframe-panel__row--easing";
+    const easingLab = document.createElement("label");
+    easingLab.textContent = "Easing";
+    this.easingSelect = document.createElement("select");
+    this.easingSelect.setAttribute("data-testid", "aicut-kf-easing");
+    for (const opt of EASING_OPTIONS) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      this.easingSelect.appendChild(o);
+    }
+    this.easingSelect.addEventListener("change", () => this.onEasingChange());
+    easingRow.append(easingLab, this.easingSelect);
+    this.root.appendChild(easingRow);
 
     const actions = document.createElement("div");
     actions.className = "aicut-keyframe-panel__actions";
@@ -114,7 +141,16 @@ export class KeyframePanel {
       panY: valueOf("panY"),
       scale: valueOf("scale"),
     };
-    const syncKey = `${clip.id}|${time}|${v.panX.toFixed(2)}|${v.panY.toFixed(2)}|${v.scale.toFixed(4)}|${moment.map((m) => m.prop).join(",")}`;
+    // Easing shown in the dropdown — the moment's "shared" easing,
+    // which is the common value across panX/panY/scale at this time.
+    // If they diverge we surface the anchor kf's easing (the one the
+    // user clicked); changing the dropdown re-syncs all three.
+    const sharedEasing = (() => {
+      if (moment.length === 0) return "linear" as EasingKind;
+      const anchor = moment.find((k) => k.id === sel.keyframeId) ?? moment[0]!;
+      return anchor.easing ?? "linear";
+    })();
+    const syncKey = `${clip.id}|${time}|${v.panX.toFixed(2)}|${v.panY.toFixed(2)}|${v.scale.toFixed(4)}|${moment.map((m) => m.prop).join(",")}|${sharedEasing}`;
     this.root.style.display = "flex";
     if (syncKey === this.lastSyncKey) return;
     this.lastSyncKey = syncKey;
@@ -123,6 +159,13 @@ export class KeyframePanel {
     this.setIfBlur(this.inputs.panY, String(Math.round(v.panY)));
     this.setIfBlur(this.inputs.scale, v.scale.toFixed(2));
     this.timeLabel.textContent = `${(time / 1000).toFixed(2)}s`;
+    if (this.easingSelect.value !== sharedEasing) {
+      this.easingSelect.value = sharedEasing;
+    }
+    // Disable when there's no kf at this moment to attach easing to —
+    // panel can also surface for "future kf" cases where the moment
+    // array is empty.
+    this.easingSelect.disabled = moment.length === 0;
 
     // Filled dot = a keyframe for THIS prop pins THIS moment.
     // Outlined = no kf at this moment for the prop (the displayed
@@ -207,6 +250,16 @@ export class KeyframePanel {
         });
       }
     }
+  }
+
+  private onEasingChange(): void {
+    const sel = this.editor.getSelectedKeyframe();
+    if (!sel) return;
+    const clip = this.findClip(sel.clipId);
+    const anchorKf = clip?.keyframes?.find((k) => k.id === sel.keyframeId);
+    if (!clip || !anchorKf) return;
+    const next = this.easingSelect.value as EasingKind;
+    this.editor.setKeyframesEasingAtTime(sel.clipId, anchorKf.time, next);
   }
 
   private onReset(): void {

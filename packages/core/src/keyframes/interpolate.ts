@@ -1,8 +1,35 @@
-import type { Clip, Keyframe, KeyframeProp, Ms } from "../types.js";
+import type { Clip, EasingKind, Keyframe, KeyframeProp, Ms } from "../types.js";
 import {
   IDENTITY_TRANSFORM,
   type EffectiveTransform,
 } from "./types.js";
+
+/**
+ * Map normalized time t∈[0,1] to eased t' via cubic easing. Cubic was
+ * picked over quadratic because the start / end "stickiness" is more
+ * pronounced — when the user picks `easeIn` they typically want the
+ * motion to clearly hold at the start, not just barely slow down.
+ *
+ * `easing` is the leaving keyframe's outgoing curve — matches AE /
+ * Premiere / CapCut convention so the user only sets it once per kf,
+ * not once per segment.
+ */
+export function applyEasing(t: number, easing: EasingKind): number {
+  switch (easing) {
+    case "linear":
+      return t;
+    case "easeIn":
+      return t * t * t;
+    case "easeOut": {
+      const u = 1 - t;
+      return 1 - u * u * u;
+    }
+    case "easeInOut":
+      return t < 0.5
+        ? 4 * t * t * t
+        : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+}
 
 /** Default value when a property has neither static base nor keyframes. */
 function defaultFor(prop: KeyframeProp): number {
@@ -63,8 +90,12 @@ export function interpolateProp(
     const b = arr[i + 1]!;
     if (localMs >= a.time && localMs <= b.time) {
       if (b.time === a.time) return a.value;
-      const t = (localMs - a.time) / (b.time - a.time);
-      return a.value + (b.value - a.value) * t;
+      const rawT = (localMs - a.time) / (b.time - a.time);
+      // Easing belongs to the LEAVING keyframe (a) — the curve from
+      // a→b is shaped by a.easing. Undefined / missing field
+      // gracefully degrades to "linear" so old projects look the same.
+      const eased = applyEasing(rawT, a.easing ?? "linear");
+      return a.value + (b.value - a.value) * eased;
     }
   }
   return last.value;

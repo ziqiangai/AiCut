@@ -207,6 +207,45 @@
   box-shadow: 0 0 6px rgba(255, 51, 134, 0.5);
 }
 
+/* Easing dropdown row — shares the row layout with the number rows
+   but uses a <select> styled to look like the inputs above. */
+.aicut-keyframe-panel__row--easing select {
+  flex: 1;
+  width: 100%;
+  padding: 5px 8px;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--aicut-controls-text, rgba(255, 255, 255, 0.92));
+  background: var(--aicut-controls-hover, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--aicut-controls-border, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  appearance: none;
+  cursor: pointer;
+  /* Tiny chevron drawn with a gradient — no extra asset. */
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-size:
+    4px 4px,
+    4px 4px;
+  background-repeat: no-repeat;
+  padding-right: 24px;
+}
+.aicut-keyframe-panel__row--easing select:hover:not(:disabled) {
+  background-color: var(--aicut-controls-active, rgba(255, 255, 255, 0.1));
+}
+.aicut-keyframe-panel__row--easing select:focus {
+  outline: none;
+  border-color: var(--color-brand, #ff3386);
+  box-shadow: 0 0 0 2px rgba(255, 51, 134, 0.22);
+}
+.aicut-keyframe-panel__row--easing select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .aicut-keyframe-panel__actions {
   display: flex;
   gap: 6px;

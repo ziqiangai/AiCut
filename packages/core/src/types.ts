@@ -58,6 +58,19 @@ export interface Clip {
 export type KeyframeProp = "panX" | "panY" | "scale";
 
 /**
+ * Easing curve that shapes the segment LEAVING this keyframe — i.e.
+ * the curve from this keyframe to the next one in time. Matches the
+ * "outgoing" easing model in After Effects / Premiere / CapCut so a
+ * single dropdown per keyframe is enough.
+ *
+ *   - `linear`     — constant rate (default)
+ *   - `easeIn`     — start slow, finish fast (cubic)
+ *   - `easeOut`    — start fast, finish slow (cubic)
+ *   - `easeInOut`  — slow on both ends, fast in the middle (cubic)
+ */
+export type EasingKind = "linear" | "easeIn" | "easeOut" | "easeInOut";
+
+/**
  * One pinned value for one property at one moment in clip-local time.
  * Properties without keyframes fall back to the clip's static base
  * value (`Clip.panX` / `panY` / `scale`).
@@ -71,6 +84,10 @@ export interface Keyframe {
   /** The value the property holds at this moment. Same units as the
    *  matching static field (CSS px for pan, multiplier for scale). */
   value: number;
+  /** Easing curve for the segment leaving THIS keyframe toward the
+   *  next one. Optional — omitted / undefined = "linear" (back-compat
+   *  with projects authored before the easing field existed). */
+  easing?: EasingKind;
 }
 
 export interface Track {

@@ -11,6 +11,8 @@ export type {
   Track,
   Clip,
   Keyframe,
+  KeyframeProp,
+  EasingKind,
   Ms,
   Theme,
 } from "./types.js";

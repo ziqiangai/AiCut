@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Clip } from "../types.js";
-import { getEffectiveTransform } from "./interpolate.js";
+import { applyEasing, getEffectiveTransform } from "./interpolate.js";
 import { IDENTITY_TRANSFORM } from "./types.js";
 
 function clip(overrides?: Partial<Clip>): Clip {
@@ -133,5 +133,61 @@ describe("getEffectiveTransform — per-property keyframes", () => {
       panY: 50,
       scale: 1,
     });
+  });
+
+  it("missing easing field on a kf is treated as linear (back-compat)", () => {
+    // Pre-easing projects have no `easing` field at all. Must not
+    // throw, must lerp linearly.
+    const c = clip({
+      keyframes: [
+        { id: "k1", prop: "scale", time: 0, value: 1 },
+        { id: "k2", prop: "scale", time: 1000, value: 2 },
+      ],
+    });
+    expect(getEffectiveTransform(c, 500).scale).toBeCloseTo(1.5);
+  });
+
+  it("easing is taken from the LEAVING kf (a→b is shaped by a.easing)", () => {
+    // panX: kf@0 (v=0, easeIn) → kf@1000 (v=100). At t=500, eased
+    // value follows easeIn (t³): 0.5³ = 0.125 → value 12.5.
+    const c = clip({
+      keyframes: [
+        { id: "k1", prop: "panX", time: 0, value: 0, easing: "easeIn" },
+        { id: "k2", prop: "panX", time: 1000, value: 100 },
+      ],
+    });
+    expect(getEffectiveTransform(c, 500).panX).toBeCloseTo(12.5, 5);
+    // Endpoints stay on the value regardless of curve.
+    expect(getEffectiveTransform(c, 0).panX).toBe(0);
+    expect(getEffectiveTransform(c, 1000).panX).toBe(100);
+  });
+
+  it("applyEasing — endpoint identities + monotonicity sanity", () => {
+    for (const kind of ["linear", "easeIn", "easeOut", "easeInOut"] as const) {
+      expect(applyEasing(0, kind)).toBeCloseTo(0, 6);
+      expect(applyEasing(1, kind)).toBeCloseTo(1, 6);
+    }
+    // easeIn pulls the value below linear at t=0.5; easeOut pushes
+    // above it. Cubic gives a big gap so this is robust.
+    expect(applyEasing(0.5, "easeIn")).toBeLessThan(0.5);
+    expect(applyEasing(0.5, "easeOut")).toBeGreaterThan(0.5);
+    // easeInOut crosses 0.5 at t=0.5 (symmetric).
+    expect(applyEasing(0.5, "easeInOut")).toBeCloseTo(0.5, 6);
+  });
+
+  it("each segment can have its own easing", () => {
+    // Segment 1: linear (default). Segment 2: easeOut.
+    const c = clip({
+      keyframes: [
+        { id: "k1", prop: "scale", time: 0, value: 1 },
+        { id: "k2", prop: "scale", time: 1000, value: 2, easing: "easeOut" },
+        { id: "k3", prop: "scale", time: 2000, value: 3 },
+      ],
+    });
+    // Segment 1 mid: linear.
+    expect(getEffectiveTransform(c, 500).scale).toBeCloseTo(1.5);
+    // Segment 2 mid: easeOut → t=0.5, 1-(1-0.5)³ = 0.875. So
+    // value = 2 + 0.875*(3-2) = 2.875.
+    expect(getEffectiveTransform(c, 1500).scale).toBeCloseTo(2.875, 5);
   });
 });
