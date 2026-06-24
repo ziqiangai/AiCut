@@ -127,6 +127,17 @@ export async function renderProject(
         "+faststart",
       ];
       const hasKeyframes = (clip.keyframes?.length ?? 0) > 0;
+      if (hasKeyframes && !(opts.width && opts.height)) {
+        // Silent skip historically — kf path needs an output canvas
+        // and the original gate `hasKeyframes && opts.width && ...`
+        // just fell through to the no-vf branch when dims were
+        // missing. Now we warn so the operator notices instead of
+        // shipping an un-animated export and wondering why.
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[render] clip ${clip.id} has ${clip.keyframes!.length} keyframe(s) but no output width/height — pass { output: { width, height } } in the request to apply keyframe animation.`,
+        );
+      }
       if (hasKeyframes && opts.width && opts.height) {
         // Animated path — build a filter_complex that mirrors the
         // frontend PiP semantics (fixed black bg, animated content

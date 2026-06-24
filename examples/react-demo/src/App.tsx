@@ -1,4 +1,11 @@
-import { useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import {
   CanvasCompositorEngine,
   TRACK_HEIGHT,
@@ -176,6 +183,186 @@ function FramePicker() {
   );
 }
 
+/**
+ * Settings popover for the export action. Floats below the "导出"
+ * button. Click-outside / Esc dismisses (Cancel button does the same).
+ * Confirm calls back into the parent which triggers `api.requestExport`
+ * after stashing the latest output settings.
+ */
+type ExportAspectKey = "16:9" | "9:16" | "1:1" | "4:3";
+function ExportPopover(props: {
+  aspect: ExportAspectKey;
+  resIdx: number;
+  fps: number;
+  resolutions: Record<
+    ExportAspectKey,
+    Array<{ label: string; width: number; height: number }>
+  >;
+  fpsOptions: number[];
+  onChangeAspect: (a: ExportAspectKey) => void;
+  onChangeResIdx: (i: number) => void;
+  onChangeFps: (f: number) => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  // Click-outside + Esc — same pattern as the keyframe panel dropdown.
+  // rAF defers the listener so the same click that opened us doesn't
+  // immediately close us via outside-click.
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) props.onCancel();
+    };
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") props.onCancel();
+    };
+    const handle = requestAnimationFrame(() => {
+      document.addEventListener("click", onDocClick, true);
+      document.addEventListener("keydown", onKeydown);
+    });
+    return () => {
+      cancelAnimationFrame(handle);
+      document.removeEventListener("click", onDocClick, true);
+      document.removeEventListener("keydown", onKeydown);
+    };
+  }, [props]);
+  const opts = props.resolutions[props.aspect];
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      data-testid="demo-export-popover"
+      style={{
+        position: "absolute",
+        top: "calc(100% + 8px)",
+        right: 0,
+        zIndex: 100,
+        minWidth: 240,
+        padding: 12,
+        background: "var(--aicut-controls-bg, #1a1a1d)",
+        border: "1px solid var(--aicut-controls-border, rgba(255,255,255,0.12))",
+        borderRadius: 8,
+        boxShadow: "0 8px 28px rgba(0,0,0,0.32)",
+        color: "var(--aicut-controls-text, rgba(255,255,255,0.92))",
+        fontSize: 12,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div style={{ fontWeight: 600, fontSize: 13 }}>导出设置</div>
+      <Row label="比例">
+        <select
+          data-testid="demo-export-aspect"
+          value={props.aspect}
+          onChange={(e) =>
+            props.onChangeAspect(e.target.value as ExportAspectKey)
+          }
+          style={popoverSelectStyle}
+        >
+          {(Object.keys(props.resolutions) as ExportAspectKey[]).map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <Row label="分辨率">
+        <select
+          data-testid="demo-export-resolution"
+          value={props.resIdx}
+          onChange={(e) => props.onChangeResIdx(Number(e.target.value))}
+          style={popoverSelectStyle}
+        >
+          {opts.map((r, i) => (
+            <option key={r.label} value={i}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <Row label="帧率">
+        <select
+          data-testid="demo-export-fps"
+          value={props.fps}
+          onChange={(e) => props.onChangeFps(Number(e.target.value))}
+          style={popoverSelectStyle}
+        >
+          {props.fpsOptions.map((f) => (
+            <option key={f} value={f}>
+              {f} fps
+            </option>
+          ))}
+        </select>
+      </Row>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          justifyContent: "flex-end",
+          marginTop: 4,
+        }}
+      >
+        <button
+          type="button"
+          onClick={props.onCancel}
+          style={{
+            ...demoSlotBtnStyle,
+            background:
+              "var(--aicut-controls-hover, rgba(255,255,255,0.06))",
+          }}
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          data-testid="demo-export-confirm"
+          onClick={props.onConfirm}
+          style={{
+            ...demoSlotBtnStyle,
+            background: "var(--color-brand, #ff3386)",
+            color: "#fff",
+            fontWeight: 600,
+          }}
+        >
+          确定
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Row(props: { label: string; children: ReactNode }) {
+  return (
+    <label
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+      }}
+    >
+      <span style={{ opacity: 0.72 }}>{props.label}</span>
+      {props.children}
+    </label>
+  );
+}
+
+const popoverSelectStyle: CSSProperties = {
+  minWidth: 140,
+  height: 28,
+  padding: "0 8px",
+  borderRadius: 6,
+  border:
+    "1px solid var(--aicut-controls-border, rgba(255,255,255,0.16))",
+  background:
+    "var(--aicut-controls-hover, rgba(255,255,255,0.06))",
+  color: "inherit",
+  fontFamily: "inherit",
+  fontSize: 12,
+  appearance: "none",
+};
+
 // Mirror .aicut-icon-btn chrome exactly — same height, radius, no
 // border, background tints on hover. Using `appearance: none` on the
 // <select> is required: macOS' native popup-button has a minimum
@@ -238,6 +425,49 @@ export function App() {
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
   const [themeName, setThemeName] = useState<"dark" | "light">("dark");
   const [aspect, setAspect] = useState<"16:9" | "9:16" | "1:1">("16:9");
+  // Export popover state. The user opens it via the "导出" button,
+  // picks aspect / resolution / fps, then Confirm posts. Mirrors how
+  // real NLEs gate export behind a settings dialog so accidental
+  // single-clicks don't kick off a 30-second encode at the wrong
+  // dimensions. The keyframe-compilation branch on the backend is
+  // ALSO gated on width+height, so silently exporting at "no dims"
+  // would skip animation entirely — bug we just fixed.
+  type ExportAspect = "16:9" | "9:16" | "1:1" | "4:3";
+  const RESOLUTIONS: Record<
+    ExportAspect,
+    Array<{ label: string; width: number; height: number }>
+  > = {
+    "16:9": [
+      { label: "480p (854×480)", width: 854, height: 480 },
+      { label: "720p (1280×720)", width: 1280, height: 720 },
+      { label: "1080p (1920×1080)", width: 1920, height: 1080 },
+      { label: "1440p (2560×1440)", width: 2560, height: 1440 },
+      { label: "4K (3840×2160)", width: 3840, height: 2160 },
+    ],
+    "9:16": [
+      { label: "480p (480×854)", width: 480, height: 854 },
+      { label: "720p (720×1280)", width: 720, height: 1280 },
+      { label: "1080p (1080×1920)", width: 1080, height: 1920 },
+    ],
+    "1:1": [
+      { label: "720×720", width: 720, height: 720 },
+      { label: "1080×1080", width: 1080, height: 1080 },
+      { label: "1440×1440", width: 1440, height: 1440 },
+    ],
+    "4:3": [
+      { label: "480p (640×480)", width: 640, height: 480 },
+      { label: "720p (1024×768)", width: 1024, height: 768 },
+      { label: "1080p (1440×1080)", width: 1440, height: 1080 },
+    ],
+  };
+  const FPS_OPTIONS = [24, 30, 60];
+  const [exportPopoverOpen, setExportPopoverOpen] = useState(false);
+  const [exportAspect, setExportAspect] = useState<ExportAspect>("16:9");
+  // Index into RESOLUTIONS[exportAspect] — keep as index so changing
+  // aspect can fall back to "same tier" (e.g. 1080p) without remembering
+  // the old (w, h) tuple. Default to 1080p slot for 16:9.
+  const [exportResIdx, setExportResIdx] = useState(2);
+  const [exportFps, setExportFps] = useState(30);
   const [showToolbarLeft, setShowToolbarLeft] = useState(true);
   const [showToolbarRight, setShowToolbarRight] = useState(true);
   const [showHeader, setShowHeader] = useState(true);
@@ -294,7 +524,10 @@ export function App() {
   backendKindRef.current = backendKind;
   const theme = useMemo(() => THEMES[themeName], [themeName]);
 
-  const runBackendExport = async (project: Project): Promise<void> => {
+  const runBackendExport = async (
+    project: Project,
+    output: { width: number; height: number; fps: number },
+  ): Promise<void> => {
     exportAbortRef.current?.abort();
     const ac = new AbortController();
     exportAbortRef.current = ac;
@@ -319,7 +552,15 @@ export function App() {
       const res = await fetch(`${baseUrl}/export`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ project: projectForExport }),
+        // Output dims gate the kf compilation on the backend — without
+        // them ffmpeg gets neither `-vf` nor `-filter_complex` and
+        // keyframe transforms are silently skipped. The popover always
+        // supplies all three so we never accidentally regress to "no
+        // dims" again.
+        body: JSON.stringify({
+          project: projectForExport,
+          output,
+        }),
         signal: ac.signal,
       });
       if (!res.ok || !res.body) {
@@ -472,44 +713,58 @@ export function App() {
           }
           toolbarRight={
             showToolbarRight ? (
-              <button
-                type="button"
-                data-testid="demo-export"
-                className="demo-slot-btn"
-                disabled={exportStatus.running}
-                onClick={() => {
-                  // Instant feedback BEFORE the event-bus round-trip,
-                  // so a click is obviously registered even if the
-                  // editor instance is mid-recreation or the listener
-                  // chain has an issue.
-                  console.log("[demo] export clicked", apiRef.current);
-                  const api = apiRef.current;
-                  if (!api) {
-                    setExportStatus({
-                      running: false,
-                      error: "Editor API not ready yet",
-                    });
-                    return;
-                  }
-                  if (typeof api.requestExport !== "function") {
-                    setExportStatus({
-                      running: false,
-                      error:
-                        "api.requestExport is not a function — stale build?",
-                    });
-                    return;
-                  }
-                  setExportStatus({
-                    running: true,
-                    overall: 0,
-                    phase: "encode",
-                  });
-                  api.requestExport();
-                }}
-                style={demoSlotBtnStyle}
-              >
-                {exportStatus.running ? "导出中…" : "导出"}
-              </button>
+              <span style={{ position: "relative", display: "inline-block" }}>
+                <button
+                  type="button"
+                  data-testid="demo-export"
+                  className="demo-slot-btn"
+                  disabled={exportStatus.running}
+                  onClick={() => setExportPopoverOpen((v) => !v)}
+                  style={demoSlotBtnStyle}
+                >
+                  {exportStatus.running ? "导出中…" : "导出"}
+                </button>
+                {exportPopoverOpen && !exportStatus.running ? (
+                  <ExportPopover
+                    aspect={exportAspect}
+                    resIdx={exportResIdx}
+                    fps={exportFps}
+                    onChangeAspect={(a) => {
+                      setExportAspect(a);
+                      // Clamp the resolution index to the new aspect's
+                      // option count so we don't dangle past the array.
+                      setExportResIdx((i) =>
+                        Math.min(i, RESOLUTIONS[a].length - 1),
+                      );
+                    }}
+                    onChangeResIdx={setExportResIdx}
+                    onChangeFps={setExportFps}
+                    onCancel={() => setExportPopoverOpen(false)}
+                    onConfirm={() => {
+                      const api = apiRef.current;
+                      if (!api) {
+                        setExportStatus({
+                          running: false,
+                          error: "Editor API not ready yet",
+                        });
+                        return;
+                      }
+                      setExportPopoverOpen(false);
+                      setExportStatus({
+                        running: true,
+                        overall: 0,
+                        phase: "encode",
+                      });
+                      // requestExport fires the editor's `export` event
+                      // synchronously; onExport (below) closes over the
+                      // current export* state and posts with those dims.
+                      api.requestExport();
+                    }}
+                    resolutions={RESOLUTIONS}
+                    fpsOptions={FPS_OPTIONS}
+                  />
+                ) : null}
+              </span>
             ) : null
           }
           onReady={(api) => {
@@ -557,7 +812,13 @@ export function App() {
           onChange={(p) => setSavedJson(JSON.stringify(p, null, 2))}
           onExport={(p) => {
             setExportJson(JSON.stringify(p, null, 2));
-            void runBackendExport(p);
+            const res = RESOLUTIONS[exportAspect][exportResIdx]
+              ?? RESOLUTIONS[exportAspect][0]!;
+            void runBackendExport(p, {
+              width: res.width,
+              height: res.height,
+              fps: exportFps,
+            });
           }}
         />
       </div>

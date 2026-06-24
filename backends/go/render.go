@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -93,7 +94,17 @@ func renderProject(ctx context.Context, req ExportRequest, outputPath string, on
 			"-movflags", "+faststart",
 		}
 		hasKeyframes := len(clip.Keyframes) > 0
-		if hasKeyframes && req.Output != nil && req.Output.Width > 0 && req.Output.Height > 0 {
+		hasOutputDims := req.Output != nil && req.Output.Width > 0 && req.Output.Height > 0
+		if hasKeyframes && !hasOutputDims {
+			// Match the TS backend's warn so silent kf skips don't go
+			// unnoticed — operator gets a clear "your animation went
+			// nowhere because you didn't pass output dims" hint.
+			log.Printf(
+				"[render] clip %s has %d keyframe(s) but no output width/height — pass output: { width, height } in the request to apply keyframe animation.",
+				clip.ID, len(clip.Keyframes),
+			)
+		}
+		if hasKeyframes && hasOutputDims {
 			// Animated path — filter_complex mirrors the frontend PiP
 			// semantics (fixed black bg, animated content inside). See
 			// buildKeyframeFilterComplex for the math.
