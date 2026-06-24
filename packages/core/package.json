@@ -57,6 +57,11 @@
       "import": "./dist/lighting/index.js",
       "require": "./dist/lighting/index.cjs"
     },
+    "./webcodecs": {
+      "types": "./dist/playback/webcodecs/index.d.ts",
+      "import": "./dist/playback/webcodecs/index.js",
+      "require": "./dist/playback/webcodecs/index.cjs"
+    },
     "./styles.css": "./styles/theme.css"
   },
   "files": [
@@ -72,6 +77,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "mp4box": "^2.4.1",
     "three": "^0.159.0"
   },
   "devDependencies": {

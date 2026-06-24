@@ -79,6 +79,9 @@ importers:
 
   packages/core:
     dependencies:
+      mp4box:
+        specifier: ^2.4.1
+        version: 2.4.1
       three:
         specifier: ^0.159.0
         version: 0.159.0
@@ -1585,6 +1588,10 @@ packages:
 
   mnemonist@0.40.0:
     resolution: {integrity: sha512-kdd8AFNig2AD5Rkih7EPCXhu/iMvwevQFX/uEiGhZyPZi7fHqOoF4V4kHLpCfysxXMgQ4B52kdPMCwARshKvEg==}
+
+  mp4box@2.4.1:
+    resolution: {integrity: sha512-0HGX7nXoDIX6FKLVl4a3wtYjBlwqsN3xuQC3GXzNtKp98FXUOhDSq623azsz8DG5ptd9ZXcXodDkgbdMZOjWvw==}
+    engines: {node: '>=20.8.1'}
 
   mri@1.2.0:
     resolution: {integrity: sha512-tzzskb3bG8LvYGFF/mDTpq3jpI6Q9wc3LEmBaghu+DdCssd1FakN7Bc0hVNmEyGq1bq3RgfkCb3cmQLpNPOroA==}
@@ -3494,6 +3501,8 @@ snapshots:
   mnemonist@0.40.0:
     dependencies:
       obliterator: 2.0.5
+
+  mp4box@2.4.1: {}
 
   mri@1.2.0: {}
 

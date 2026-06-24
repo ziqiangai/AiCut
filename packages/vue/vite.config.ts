@@ -7,18 +7,25 @@ export default defineConfig({
   build: {
     sourcemap: true,
     lib: {
-      // Two entries: main (zero deps) + lighting (depends on three via
-      // the core sub-entry, which we keep external so it isn't bundled).
+      // Three entries: main (zero deps) + lighting (three via the core
+      // sub-entry) + webcodecs (mp4box via the core sub-entry). The
+      // sub-entries are kept external so they aren't bundled here.
       entry: {
         index: resolve(__dirname, "src/index.ts"),
         lighting: resolve(__dirname, "src/lighting.ts"),
+        webcodecs: resolve(__dirname, "src/webcodecs.ts"),
       },
       formats: ["es", "cjs"],
       fileName: (format, entry) =>
         format === "es" ? `${entry}.js` : `${entry}.cjs`,
     },
     rollupOptions: {
-      external: ["vue", "@aicut/core", "@aicut/core/lighting"],
+      external: [
+        "vue",
+        "@aicut/core",
+        "@aicut/core/lighting",
+        "@aicut/core/webcodecs",
+      ],
       output: { globals: { vue: "Vue" } },
     },
     outDir: "dist",

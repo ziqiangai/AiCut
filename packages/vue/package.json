@@ -53,6 +53,11 @@
       "types": "./dist/lighting.d.ts",
       "import": "./dist/lighting.js",
       "require": "./dist/lighting.cjs"
+    },
+    "./webcodecs": {
+      "types": "./dist/webcodecs.d.ts",
+      "import": "./dist/webcodecs.js",
+      "require": "./dist/webcodecs.cjs"
     }
   },
   "files": [
