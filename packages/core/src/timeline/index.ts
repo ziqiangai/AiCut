@@ -960,8 +960,18 @@ export class Timeline {
     const phantomIdx = this.project.tracks.length;
     const phantomScreenY =
       RULER_HEIGHT + phantomIdx * TRACK_HEIGHT - this.scrollTop;
+    // Hit zone for the "+ 新轨道" phantom row: anywhere below the last
+    // existing track up to the viewport bottom. Visually the phantom
+    // still draws at `phantomScreenY` (one row tall), but when the
+    // viewport is compact (small timelineHeight) the phantom is
+    // pushed below the visible area and the user can only reach it
+    // after auto-scrolling. Extending the hit zone all the way down
+    // means "drop anywhere in the empty space below the tracks" is
+    // interpreted as "create a new track" — matches the visual
+    // intent without requiring scroll gymnastics.
+    const viewportBottom = this.viewportHeight - SCROLLBAR_THICKNESS;
     const onPhantom =
-      y >= phantomScreenY && y < phantomScreenY + TRACK_HEIGHT;
+      y >= phantomScreenY && y < Math.max(phantomScreenY + TRACK_HEIGHT, viewportBottom);
     const intendedTrackIndex = onPhantom
       ? phantomIdx
       : tiRaw >= 0
