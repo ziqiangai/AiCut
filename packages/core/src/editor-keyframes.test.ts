@@ -425,4 +425,55 @@ describe("Editor.keyframes — per-property mutators + history + selection", () 
     expect(props).toEqual(new Set(["panX", "panY", "scale"]));
     editor.destroy();
   });
+
+  it("seekToClipEdge — start lands on clip.start; end lands 1ms inside so kf-toggle still finds the clip", () => {
+    const editor = Editor.create({
+      container,
+      project: {
+        version: 1,
+        sources: [{ id: "s1", url: "blob:x", kind: "video" }],
+        tracks: [
+          {
+            id: "t1",
+            kind: "video",
+            clips: [
+              {
+                id: "c1",
+                sourceId: "s1",
+                in: 0,
+                out: 4000,
+                // Clip starts at 1000ms on the timeline so we can tell
+                // a "playhead = clip.start" seek apart from "playhead = 0".
+                start: 1000,
+              },
+            ],
+          },
+        ],
+      },
+      playbackEngine: () => makeStubEngine(),
+    });
+    expect(editor.seekToClipEdge("c1", "start")).toBe(true);
+    expect(editor.getTime()).toBe(1000); // clip.start
+    expect(editor.seekToClipEdge("c1", "end")).toBe(true);
+    // clip.start + (out - in) = 1000 + 4000 = 5000 → seek lands at 4999
+    // (one ms shy of the seam so the playhead stays inside the clip).
+    expect(editor.getTime()).toBe(4999);
+    // No selection → selected-edge convenience returns false.
+    editor.setSelection(null);
+    expect(editor.seekToSelectedClipEdge("end")).toBe(false);
+    // With selection set, end-seek + toggle should drop kfs into c1
+    // — proves the -1ms backoff keeps toggleKeyframeAtPlayhead pointed
+    // at the right clip even at the very end. Note the second
+    // seek-to-end returns FALSE (already there from the explicit call
+    // above), which is the documented "no-op when playhead == target"
+    // contract. The toggle still runs against the same playhead.
+    editor.setSelection("c1");
+    expect(editor.seekToSelectedClipEdge("end")).toBe(false);
+    expect(editor.getTime()).toBe(4999);
+    expect(editor.toggleKeyframeAtPlayhead()).toBe(true);
+    const kfs = editor.getProject().tracks[0]?.clips[0]?.keyframes ?? [];
+    expect(kfs).toHaveLength(3); // panX/panY/scale at the end
+    expect(kfs.every((k) => k.time === 3999)).toBe(true);
+    editor.destroy();
+  });
 });

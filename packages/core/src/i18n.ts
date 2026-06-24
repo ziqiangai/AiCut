@@ -16,7 +16,6 @@ export interface Locale {
   split: string;
   trimLeft: string;
   trimRight: string;
-  speedComingSoon: string;
   playPause: string;
   fullscreen: string;
   snap: string;
@@ -31,6 +30,10 @@ export interface Locale {
   keyframeAdd: string;
   /** Toolbar tooltip when one exists — clicking removes it. */
   keyframeRemove: string;
+  /** Toolbar tooltip — jump the playhead to the selected clip's start. */
+  seekClipStart: string;
+  /** Toolbar tooltip — jump the playhead to the selected clip's end. */
+  seekClipEnd: string;
 
   // Fullscreen exit overlay
   exitFullscreen: string;
@@ -52,7 +55,6 @@ export const localeEn: Locale = {
   split: "Split",
   trimLeft: "Trim left edge",
   trimRight: "Trim right edge",
-  speedComingSoon: "Speed (coming soon)",
   playPause: "Play / Pause (Space)",
   fullscreen: "Fullscreen preview",
   snap: "Snap",
@@ -63,6 +65,8 @@ export const localeEn: Locale = {
   reset: "Reset edits (keep sources)",
   keyframeAdd: "Add keyframe at playhead",
   keyframeRemove: "Remove keyframe at playhead",
+  seekClipStart: "Jump to clip start (I)",
+  seekClipEnd: "Jump to clip end (O)",
   exitFullscreen: "Exit fullscreen",
   exitFullscreenTitle: "Exit fullscreen (Esc)",
   newTrack: "+ New track",
@@ -77,7 +81,6 @@ export const localeZh: Locale = {
   split: "分割",
   trimLeft: "向左裁剪",
   trimRight: "向右裁剪",
-  speedComingSoon: "变速（即将到来）",
   playPause: "播放 / 暂停 (Space)",
   fullscreen: "全屏预览",
   snap: "吸附",
@@ -88,6 +91,8 @@ export const localeZh: Locale = {
   reset: "重置编辑（保留视频源）",
   keyframeAdd: "添加关键帧",
   keyframeRemove: "删除当前关键帧",
+  seekClipStart: "跳到片段起点 (I)",
+  seekClipEnd: "跳到片段末尾 (O)",
   exitFullscreen: "退出全屏",
   exitFullscreenTitle: "退出全屏 (Esc)",
   newTrack: "+ 新轨道",

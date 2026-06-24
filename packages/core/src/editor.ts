@@ -281,6 +281,19 @@ export interface EditorApi {
    * entry. Used by the panel's Reset button when a keyframe is selected.
    */
   resetKeyframesAtTime(clipId: string, timeMs: Ms): boolean;
+  /**
+   * Move the playhead to a clip edge. "end" intentionally lands 1ms
+   * INSIDE the clip (clipEnd - 1) so the playhead remains inside the
+   * clip — that lets the user immediately press the keyframe button
+   * (or the I/O shortcut) and have it find the right clip + drop a
+   * keyframe at clip-local time `duration - 1ms`. Without the -1ms
+   * offset the playhead lands on the seam and `toggleKeyframeAtPlayhead`
+   * picks the next clip (or none at all).
+   * Returns true when the seek actually moved.
+   */
+  seekToClipEdge(clipId: string, edge: "start" | "end"): boolean;
+  /** Convenience for the toolbar: act on the currently-selected clip. */
+  seekToSelectedClipEdge(edge: "start" | "end"): boolean;
 
   // history
   canUndo(): boolean;
@@ -398,6 +411,8 @@ export class Editor implements EditorApi {
       onMoveKeyframe: (clipId, keyframeId, timeMs) =>
         this.moveKeyframe(clipId, keyframeId, timeMs),
       onKeyframeToggle: () => this.toggleKeyframeAtPlayhead(),
+      onSeekClipStart: () => this.seekToSelectedClipEdge("start"),
+      onSeekClipEnd: () => this.seekToSelectedClipEdge("end"),
     });
 
     const engineFactory: PlaybackEngineFactory =
@@ -1209,6 +1224,28 @@ export class Editor implements EditorApi {
     cl.keyframes = kfs;
     this.afterMutation();
     return true;
+  }
+
+  seekToClipEdge(clipId: string, edge: "start" | "end"): boolean {
+    const trk = findTrackOfClip(this.project, clipId);
+    const cl = trk?.clips.find((c) => c.id === clipId);
+    if (!trk || !cl) return false;
+    // "end" lands 1ms inside the clip so the playhead stays inside —
+    // toggleKeyframeAtPlayhead and friends look up the clip via the
+    // playhead time, and a playhead landing exactly on the clip-end
+    // seam picks up the *next* clip (or nothing). The 1ms backoff
+    // costs nothing perceptually and keeps the keyframe-add workflow
+    // single-click. See seekToClipEdge doc in the API surface.
+    const target =
+      edge === "start" ? cl.start : Math.max(cl.start, clipEnd(cl) - 1);
+    if (this.engine.getTime() === target) return false;
+    this.seek(target);
+    return true;
+  }
+
+  seekToSelectedClipEdge(edge: "start" | "end"): boolean {
+    if (!this.selectedClipId) return false;
+    return this.seekToClipEdge(this.selectedClipId, edge);
   }
 
   toggleKeyframeAtPlayhead(): boolean {

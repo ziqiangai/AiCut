@@ -53,6 +53,16 @@ export const ICONS = {
   trash: wrap(
     `<g transform="translate(1 1)" fill="currentColor"><path d="M5 1.25h4v.9H13v1.05H1V2.15h4v-.9zM2.4 4.1h9.2l-.65 8.9c-.04.55-.5.96-1.05.96H4.1c-.55 0-1.01-.41-1.05-.96L2.4 4.1zm2.3 1.7l.35 7.1h1l-.35-7.1h-1zm2.65 0v7.1h1V5.8h-1zm2.3 0l-.35 7.1h1l.35-7.1h-1z"/></g>`,
   ),
+  /** "Skip to start" — vertical bar + left-pointing triangle. Sits to
+   *  the left of the keyframe diamond so the clip-edge nav cluster
+   *  reads as [|◀ ◇ ▶|] = "go to clip start / add kf / go to clip end". */
+  seekClipStart: wrap(
+    `<g transform="translate(2 3)" fill="currentColor"><rect x="0" y="0" width="1.6" height="10" rx="0.4"/><path d="M11 0.6c0-0.5-0.55-0.78-0.95-0.48l-6.5 4.4c-0.34 0.23-0.34 0.73 0 0.96l6.5 4.4c0.4 0.3 0.95 0.02 0.95-0.48z"/></g>`,
+  ),
+  /** "Skip to end" — mirror of seekClipStart. */
+  seekClipEnd: wrap(
+    `<g transform="translate(1 3)" fill="currentColor"><path d="M0 0.6c0-0.5 0.55-0.78 0.95-0.48l6.5 4.4c0.34 0.23 0.34 0.73 0 0.96l-6.5 4.4c-0.4 0.3-0.95 0.02-0.95-0.48z"/><rect x="10.4" y="0" width="1.6" height="10" rx="0.4"/></g>`,
+  ),
   /** Outlined diamond (rotated square) — "add keyframe" affordance. */
   keyframeOutline: wrap(
     `<g transform="translate(8 8) rotate(45) translate(-4 -4)" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="0.5" y="0.5" width="7" height="7" rx="0.5"/></g>`,

@@ -20,6 +20,11 @@ export interface ToolbarCallbacks {
    *  a keyframe already sits exactly at the playhead's clip-local time
    *  (CapCut-style toggle on the same button). */
   onKeyframeToggle: () => void;
+  /** Move the playhead to the selected clip's start / end. End seek
+   *  intentionally lands 1ms inside the clip so subsequent
+   *  keyframe-add finds the clip — see Editor.seekToSelectedClipEdge. */
+  onSeekClipStart: () => void;
+  onSeekClipEnd: () => void;
 }
 
 interface ToolbarState {
@@ -43,6 +48,9 @@ interface ToolbarState {
    *  matching the user's "demo只一个开关" requirement — chrome stays
    *  identical to today when the feature is disabled. */
   keyframesEnabled: boolean;
+  /** Enable the |◀ / ▶| jump-to-clip-edge buttons. Mirrors the
+   *  selection-driven gating used by split / trim. */
+  canSeekClipEdge: boolean;
 }
 
 /**
@@ -77,6 +85,8 @@ export class Toolbar {
   private splitBtn!: HTMLButtonElement;
   private trimLeftBtn!: HTMLButtonElement;
   private trimRightBtn!: HTMLButtonElement;
+  private seekClipStartBtn!: HTMLButtonElement;
+  private seekClipEndBtn!: HTMLButtonElement;
   private keyframeBtn!: HTMLButtonElement;
   private playBtn!: HTMLButtonElement;
   private playIcon!: HTMLSpanElement;
@@ -106,8 +116,12 @@ export class Toolbar {
     this.splitBtn = mkIconButton("split", locale.split, () => cb.onSplit(), "aicut-split");
     this.trimLeftBtn = mkIconButton("trimLeft", locale.trimLeft, () => cb.onTrimLeft(), "aicut-trim-left");
     this.trimRightBtn = mkIconButton("trimRight", locale.trimRight, () => cb.onTrimRight(), "aicut-trim-right");
-    const speedBtn = mkIconButton("speed", locale.speedComingSoon, () => undefined, "aicut-speed");
-    speedBtn.disabled = true;
+    this.seekClipStartBtn = mkIconButton(
+      "seekClipStart",
+      locale.seekClipStart,
+      () => cb.onSeekClipStart(),
+      "aicut-seek-clip-start",
+    );
     this.keyframeBtn = mkIconButton(
       "keyframeOutline",
       locale.keyframeAdd,
@@ -115,14 +129,23 @@ export class Toolbar {
       "aicut-keyframe",
     );
     this.keyframeBtn.style.display = "none"; // gated by render() on keyframesEnabled
+    this.seekClipEndBtn = mkIconButton(
+      "seekClipEnd",
+      locale.seekClipEnd,
+      () => cb.onSeekClipEnd(),
+      "aicut-seek-clip-end",
+    );
+    // Order: trim handles, then [|◀ ◇ ▶|] — start, kf, end — so the
+    // three nav buttons cluster around the keyframe affordance.
     left.append(
       this.undoBtn,
       this.redoBtn,
       this.splitBtn,
       this.trimLeftBtn,
       this.trimRightBtn,
-      speedBtn,
+      this.seekClipStartBtn,
       this.keyframeBtn,
+      this.seekClipEndBtn,
     );
 
     const center = mkGroup("aicut-toolbar-center");
@@ -205,6 +228,13 @@ export class Toolbar {
       this.trimLeftBtn.disabled = !state.canTrim;
       this.trimRightBtn.disabled = !state.canTrim;
     }
+    if (
+      !this.lastState ||
+      this.lastState.canSeekClipEdge !== state.canSeekClipEdge
+    ) {
+      this.seekClipStartBtn.disabled = !state.canSeekClipEdge;
+      this.seekClipEndBtn.disabled = !state.canSeekClipEdge;
+    }
     if (!this.lastState || this.lastState.snap !== state.snap) {
       this.snapBtn.setAttribute("aria-pressed", state.snap ? "true" : "false");
       this.snapBtn.classList.toggle("aicut-toggle-on", state.snap);
@@ -282,6 +312,8 @@ export class Toolbar {
     applyTitle(this.splitBtn, locale.split);
     applyTitle(this.trimLeftBtn, locale.trimLeft);
     applyTitle(this.trimRightBtn, locale.trimRight);
+    applyTitle(this.seekClipStartBtn, locale.seekClipStart);
+    applyTitle(this.seekClipEndBtn, locale.seekClipEnd);
     applyTitle(this.playBtn, locale.playPause);
     applyTitle(this.fullscreenBtn, locale.fullscreen);
     applyTitle(this.snapBtn, locale.snap);
