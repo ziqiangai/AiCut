@@ -13,7 +13,7 @@ import {
   trackEnd,
 } from "./model.js";
 import { wouldOverlap } from "./timeline/layout.js";
-import { PlaybackEngine } from "./playback.js";
+import { HtmlVideoEngine, type PlaybackEngine } from "./playback/index.js";
 import { applyTheme } from "./theme.js";
 import { type Locale, mergeLocale } from "./i18n.js";
 import type {
@@ -233,7 +233,10 @@ export class Editor implements EditorApi {
       onResizeClip: (id, edits) => this.resizeClip(id, edits),
     });
 
-    this.engine = new PlaybackEngine(this.ui.previewHost, this.project);
+    this.engine = new HtmlVideoEngine({
+      host: this.ui.previewHost,
+      project: this.project,
+    });
     this.engine.onTimeUpdate = (ms) => {
       this.bus.emit("time", { timeMs: ms });
       this.ui.onTimeTick(ms);

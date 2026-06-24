@@ -1,20 +1,26 @@
-import type { Clip, Ms, Project } from "./types.js";
+import type { Clip, Ms, Project } from "../types.js";
+import type {
+  PlaybackEngine,
+  PlaybackEngineFactory,
+  PlaybackEngineOptions,
+} from "./types.js";
 
 /**
- * v1 preview engine. Strategy:
- *   - one hidden <video> per MediaSource, kept warm so swapping clips
- *     doesn't trigger a fresh network fetch.
- *   - the "active" video for the current playhead is shown, others
- *     are visibility:hidden behind it.
- *   - tick loop drives a single video track's playhead, advancing
- *     through clips end-to-end. When the playhead crosses a clip
- *     boundary we pause the outgoing video and resume the next at
- *     `clip.in`.
+ * Default preview engine — one hidden `<video>` per `MediaSource`,
+ * "active" video shown for the current playhead. Tick loop drives a
+ * single video track's playhead, advancing through clips end-to-end.
+ * When the playhead crosses a clip boundary we pause the outgoing
+ * video and resume the next at `clip.in`.
  *
- * Single video track only for v1 — extending to multi-track requires
- * a compositor (Canvas/WebGL), see project notes.
+ * Strengths: zero deps, browser-native decode (GPU when available),
+ * works in every browser today.
+ *
+ * Limits: no multi-track compositing (one video visible at a time),
+ * seek snaps to keyframes (browser controls the decode pipeline), no
+ * transitions / shaders / filters. See `WebCodecsEngine` for the
+ * frame-accurate path.
  */
-export class PlaybackEngine {
+export class HtmlVideoEngine implements PlaybackEngine {
   private host: HTMLElement;
   private mount: HTMLDivElement;
   private videos = new Map<string, HTMLVideoElement>();
@@ -32,9 +38,9 @@ export class PlaybackEngine {
   onReady?: () => void;
   onSourceMetadata?: (sourceId: string, durationMs: Ms) => void;
 
-  constructor(host: HTMLElement, project: Project) {
-    this.host = host;
-    this.project = project;
+  constructor(opts: PlaybackEngineOptions) {
+    this.host = opts.host;
+    this.project = opts.project;
     this.mount = document.createElement("div");
     this.mount.className = "aicut-preview";
     this.host.appendChild(this.mount);
@@ -303,5 +309,6 @@ export class PlaybackEngine {
   }
 }
 
-// Per-track helpers moved into class methods now that playback spans
-// all video tracks — kept the file free of dangling unused exports.
+/** Factory shorthand for `Editor.create({ playbackEngine })`. */
+export const htmlVideoEngineFactory: PlaybackEngineFactory = (opts) =>
+  new HtmlVideoEngine(opts);

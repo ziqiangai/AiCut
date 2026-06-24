@@ -30,3 +30,18 @@ export {
 // built-in tooltips and canvas labels. Defaults to English.
 export { localeEn, localeZh, mergeLocale, formatLabel } from "./i18n.js";
 export type { Locale } from "./i18n.js";
+
+// Playback engine contract — hosts can ship a custom implementation
+// (WebCodecs, WebGL compositor, IPC-bridged native engine) and inject
+// it later via `Editor.create({ playbackEngine: factory })`. The
+// built-in `HtmlVideoEngine` is exposed for consumers that want to
+// extend or wrap the default behavior.
+export type {
+  PlaybackEngine,
+  PlaybackEngineFactory,
+  PlaybackEngineOptions,
+} from "./playback/index.js";
+export {
+  HtmlVideoEngine,
+  htmlVideoEngineFactory,
+} from "./playback/index.js";
