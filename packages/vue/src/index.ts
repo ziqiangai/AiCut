@@ -13,6 +13,7 @@ export type {
   PlaybackEngine,
   PlaybackEngineFactory,
   PlaybackEngineOptions,
+  CanvasCompositorEngineOptions,
 } from "@aicut/core";
 export {
   createEmptyProject,

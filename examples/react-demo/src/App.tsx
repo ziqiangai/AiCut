@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState, type CSSProperties } from "react";
 import {
+  CanvasCompositorEngine,
   Timeline,
   VideoEditor,
-  canvasCompositorEngineFactory,
   createEmptyProject,
   createId,
   htmlVideoEngineFactory,
@@ -238,14 +238,17 @@ export function App() {
   // Demo of the new pluggable playback engine — flip between the
   // default HtmlVideoEngine and a host-supplied CanvasCompositorEngine
   // (a real second implementation: same browser decode, but rendering
-  // happens via ctx.drawImage on a single canvas + a debug HUD).
+  // happens via ctx.drawImage on a single canvas + an opt-in HUD).
   // The engine binds at construction, so we force a VideoEditor
-  // remount via `key={engineKind}` when this changes.
+  // remount via `key={engineKind}` when this changes. Canvas mode
+  // turns `debug: true` ON so the badge is visible — that's the
+  // whole point of the demo. Production hosts construct the engine
+  // without `debug` (default false) and get a clean canvas.
   const [engineKind, setEngineKind] = useState<"html" | "canvas">("html");
   const playbackEngine: PlaybackEngineFactory = useMemo(
     () =>
       engineKind === "canvas"
-        ? canvasCompositorEngineFactory
+        ? (opts) => new CanvasCompositorEngine({ ...opts, debug: true })
         : htmlVideoEngineFactory,
     [engineKind],
   );

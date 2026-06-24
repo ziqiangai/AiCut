@@ -5,6 +5,16 @@ import type {
   PlaybackEngineOptions,
 } from "./types.js";
 
+export interface CanvasCompositorEngineOptions extends PlaybackEngineOptions {
+  /**
+   * Show the corner HUD ("engine: canvas compositor • t=… • frames
+   * painted: …"). Off by default — production hosts get a clean canvas
+   * with no chrome painted on top. Turn on in development / demos to
+   * see who's drawing and what the current state is.
+   */
+  debug?: boolean;
+}
+
 /**
  * Reference second engine — demonstrates that the `PlaybackEngine`
  * surface really is engine-agnostic. Same `<video>`-based decode as
@@ -27,7 +37,8 @@ export class CanvasCompositorEngine implements PlaybackEngine {
   private mount: HTMLDivElement;
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private badge: HTMLDivElement;
+  /** Only created when constructed with `debug: true`. */
+  private badge: HTMLDivElement | null = null;
   private videos = new Map<string, HTMLVideoElement>();
   private project: Project;
   private currentClipId: string | null = null;
@@ -43,7 +54,7 @@ export class CanvasCompositorEngine implements PlaybackEngine {
   onReady?: () => void;
   onSourceMetadata?: (sourceId: string, durationMs: Ms) => void;
 
-  constructor(opts: PlaybackEngineOptions) {
+  constructor(opts: CanvasCompositorEngineOptions) {
     this.host = opts.host;
     this.project = opts.project;
 
@@ -74,23 +85,26 @@ export class CanvasCompositorEngine implements PlaybackEngine {
     if (!ctx) throw new Error("CanvasCompositorEngine: 2d context unavailable");
     this.ctx = ctx;
 
-    this.badge = document.createElement("div");
-    this.badge.className = "aicut-preview__badge";
-    Object.assign(this.badge.style, {
-      position: "absolute",
-      top: "8px",
-      left: "8px",
-      padding: "4px 8px",
-      borderRadius: "6px",
-      background: "rgba(0, 0, 0, 0.55)",
-      color: "rgba(255, 255, 255, 0.92)",
-      font: "11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace",
-      pointerEvents: "none",
-      zIndex: "2",
-      letterSpacing: "0.02em",
-    } satisfies Partial<CSSStyleDeclaration>);
-    this.badge.textContent = "engine: canvas compositor";
-    this.mount.appendChild(this.badge);
+    if (opts.debug) {
+      const badge = document.createElement("div");
+      badge.className = "aicut-preview__badge";
+      Object.assign(badge.style, {
+        position: "absolute",
+        top: "8px",
+        left: "8px",
+        padding: "4px 8px",
+        borderRadius: "6px",
+        background: "rgba(0, 0, 0, 0.55)",
+        color: "rgba(255, 255, 255, 0.92)",
+        font: "11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace",
+        pointerEvents: "none",
+        zIndex: "2",
+        letterSpacing: "0.02em",
+      } satisfies Partial<CSSStyleDeclaration>);
+      badge.textContent = "engine: canvas compositor";
+      this.mount.appendChild(badge);
+      this.badge = badge;
+    }
 
     this.host.appendChild(this.mount);
     this.syncSources();
@@ -363,6 +377,7 @@ export class CanvasCompositorEngine implements PlaybackEngine {
   }
 
   private updateBadge(): void {
+    if (!this.badge) return;
     const sec = (this.timeMs / 1000).toFixed(2);
     this.badge.textContent =
       `engine: canvas compositor • t=${sec}s • frames painted: ${this.paintedFrames}`;

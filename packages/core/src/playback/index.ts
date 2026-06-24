@@ -8,3 +8,4 @@ export {
   CanvasCompositorEngine,
   canvasCompositorEngineFactory,
 } from "./canvas-compositor.js";
+export type { CanvasCompositorEngineOptions } from "./canvas-compositor.js";

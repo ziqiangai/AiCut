@@ -40,6 +40,7 @@ export type {
   PlaybackEngine,
   PlaybackEngineFactory,
   PlaybackEngineOptions,
+  CanvasCompositorEngineOptions,
 } from "./playback/index.js";
 export {
   HtmlVideoEngine,

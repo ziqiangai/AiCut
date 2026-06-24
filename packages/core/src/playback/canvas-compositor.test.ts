@@ -38,10 +38,27 @@ describe("CanvasCompositorEngine", () => {
     host.remove();
   });
 
-  it("mounts a canvas + a debug badge into the host", () => {
+  it("mounts a canvas into the host", () => {
     const engine = new CanvasCompositorEngine({ host, project: project() });
     expect(host.querySelector("canvas")).not.toBeNull();
-    expect(host.querySelector(".aicut-preview__badge")).not.toBeNull();
+    engine.destroy();
+  });
+
+  it("does NOT paint the debug HUD by default", () => {
+    const engine = new CanvasCompositorEngine({ host, project: project() });
+    expect(host.querySelector(".aicut-preview__badge")).toBeNull();
+    engine.destroy();
+  });
+
+  it("paints the debug HUD when constructed with debug: true", () => {
+    const engine = new CanvasCompositorEngine({
+      host,
+      project: project(),
+      debug: true,
+    });
+    const badge = host.querySelector(".aicut-preview__badge");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toMatch(/canvas compositor/);
     engine.destroy();
   });
 
@@ -94,9 +111,14 @@ describe("CanvasCompositorEngine", () => {
     engine.destroy();
   });
 
-  it("destroy() removes the preview mount entirely", () => {
-    const engine = new CanvasCompositorEngine({ host, project: project() });
+  it("destroy() removes the preview mount entirely (including HUD when on)", () => {
+    const engine = new CanvasCompositorEngine({
+      host,
+      project: project(),
+      debug: true,
+    });
     expect(host.querySelector(".aicut-preview")).not.toBeNull();
+    expect(host.querySelector(".aicut-preview__badge")).not.toBeNull();
     engine.destroy();
     expect(host.querySelector(".aicut-preview")).toBeNull();
     expect(host.querySelector("canvas")).toBeNull();
