@@ -268,6 +268,19 @@ export interface EditorApi {
    * Returns true when the project changed.
    */
   toggleKeyframeAtPlayhead(): boolean;
+  /**
+   * Clear every keyframe AND every static transform value on a clip,
+   * restoring the identity pose (panX=0, panY=0, scale=1). Single
+   * history entry. */
+  resetClipTransform(clipId: string): boolean;
+  /**
+   * Pin all three transform props (panX, panY, scale) to identity
+   * (0, 0, 1) at one specific clip-local time. Upserts on each prop —
+   * keyframes that already exist at that time get their values
+   * overwritten; props with no kf there get one added. Single history
+   * entry. Used by the panel's Reset button when a keyframe is selected.
+   */
+  resetKeyframesAtTime(clipId: string, timeMs: Ms): boolean;
 
   // history
   canUndo(): boolean;
@@ -1148,6 +1161,54 @@ export class Editor implements EditorApi {
 
   getSelectedKeyframe(): { clipId: string; keyframeId: string } | null {
     return this.selectedKeyframe;
+  }
+
+  resetClipTransform(clipId: string): boolean {
+    const trk = findTrackOfClip(this.project, clipId);
+    const cl = trk?.clips.find((c) => c.id === clipId);
+    if (!trk || !cl) return false;
+    const dirty =
+      (cl.keyframes && cl.keyframes.length > 0) ||
+      cl.panX !== undefined ||
+      cl.panY !== undefined ||
+      cl.scale !== undefined;
+    if (!dirty) return false;
+    this.pushHistory();
+    delete cl.panX;
+    delete cl.panY;
+    delete cl.scale;
+    cl.keyframes = undefined;
+    if (
+      this.selectedKeyframe &&
+      this.selectedKeyframe.clipId === clipId
+    ) {
+      this.selectedKeyframe = null;
+      this.bus.emit("keyframeSelectionChange", { target: null });
+    }
+    this.afterMutation();
+    return true;
+  }
+
+  resetKeyframesAtTime(clipId: string, timeMs: Ms): boolean {
+    const trk = findTrackOfClip(this.project, clipId);
+    const cl = trk?.clips.find((c) => c.id === clipId);
+    if (!trk || !cl) return false;
+    const duration = clipDuration(cl);
+    const t = Math.max(0, Math.min(duration, Math.round(timeMs)));
+    // Identity values for each prop. Upsert in one batch so the
+    // history stack records a single "reset" entry, not three.
+    this.pushHistory();
+    let kfs = cl.keyframes ?? [];
+    kfs = upsertKeyframe(kfs, "panX", t, 0, () => createId("kf"));
+    kfs = upsertKeyframe(kfs, "panY", t, 0, () => createId("kf"));
+    kfs = upsertKeyframe(kfs, "scale", t, 1, () => createId("kf"));
+    kfs.sort((a, b) => {
+      if (a.prop !== b.prop) return a.prop.localeCompare(b.prop);
+      return a.time - b.time;
+    });
+    cl.keyframes = kfs;
+    this.afterMutation();
+    return true;
   }
 
   toggleKeyframeAtPlayhead(): boolean {

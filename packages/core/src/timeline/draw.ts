@@ -1,5 +1,11 @@
 import { formatLabel, type Locale } from "../i18n.js";
-import type { Clip, MediaSource, Project, Track } from "../types.js";
+import type {
+  Clip,
+  Keyframe,
+  MediaSource,
+  Project,
+  Track,
+} from "../types.js";
 import { fmtClockMs } from "../ui/format.js";
 import type { ThumbnailRibbon } from "../ui/thumbnails.js";
 import {
@@ -579,10 +585,11 @@ function drawClipAt(
     ctx.fillRect(startX + widthPx - 4, y + 12, 2, h - 24);
   }
 
-  // Keyframe markers — only when keyframe mode is on and the clip has
-  // any. Diamonds sit on the clip body vertical center; the selected
-  // one is filled with the theme's selection ring (brand) color so it
-  // pops against the gradient.
+  // Keyframe markers — one diamond per UNIQUE moment in time (a
+  // moment is a cluster of per-prop keyframes at the same time —
+  // typically the panX/panY/scale trio from a single toolbar click).
+  // Painted on the clip body vertical center; selected = brand fill,
+  // hovered = brighter + slightly bigger.
   if (
     !dim &&
     state.keyframesEnabled &&
@@ -591,24 +598,27 @@ function drawClipAt(
   ) {
     const diamondY = y + h / 2;
     const halfSize = 5; // visible diamond is 10 × 10 px
-    for (const kf of clip.keyframes) {
-      // While a drag is in flight on THIS keyframe, paint it at the
-      // ghost time so the diamond follows the cursor smoothly.
-      const ghost = state.keyframeDragGhost;
-      const effectiveTime =
-        ghost && ghost.clipId === clip.id && ghost.keyframeId === kf.id
-          ? ghost.ghostTimeMs
-          : kf.time;
+    // Group keyframes by time (within 16 ms of each other = "same moment").
+    const moments = groupKeyframesByTime(clip.keyframes, 16);
+    const ghost = state.keyframeDragGhost;
+    for (const moment of moments) {
+      // The dragged kf within this moment (if any) carries the
+      // ghost time. We just paint one diamond per moment though, so
+      // any one kf belonging to it is enough to detect the ghost.
+      const draggedHere = ghost
+        ? moment.kfs.find(
+            (k) => ghost.clipId === clip.id && ghost.keyframeId === k.id,
+          )
+        : undefined;
+      const effectiveTime = draggedHere ? ghost!.ghostTimeMs : moment.time;
       const kfX = startX + (effectiveTime / 1000) * pxPerSec;
-      // Cheap viewport cull — diamonds outside the canvas don't paint.
       if (kfX < baseX - halfSize || kfX > state.viewportWidth + halfSize) continue;
       const isSelected =
         state.selectedKeyframe?.clipId === clip.id &&
-        state.selectedKeyframe?.keyframeId === kf.id;
+        moment.kfs.some((k) => k.id === state.selectedKeyframe?.keyframeId);
       const isHovered =
         state.hoveredKeyframe?.clipId === clip.id &&
-        state.hoveredKeyframe?.keyframeId === kf.id;
-      // Hover bumps the diamond up by ~20% so it visibly reacts.
+        moment.kfs.some((k) => k.id === state.hoveredKeyframe?.keyframeId);
       const drawSize = isHovered ? halfSize + 1.5 : halfSize;
       ctx.beginPath();
       ctx.moveTo(kfX, diamondY - drawSize);
@@ -937,4 +947,28 @@ function parseColor(s: string): [number, number, number] | null {
   const m = s.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
   if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
   return null;
+}
+
+/**
+ * Cluster per-property keyframes by clip-local time. Two keyframes
+ * within `epsilonMs` are considered the same "moment" (a UX concept
+ * — the user thinks of "this point in time" as a single keyframe
+ * regardless of which props are pinned). Used for one-diamond-per-
+ * moment rendering and for moment-aware hit-testing.
+ */
+export function groupKeyframesByTime(
+  kfs: Keyframe[],
+  epsilonMs: number,
+): Array<{ time: number; kfs: Keyframe[] }> {
+  const sorted = [...kfs].sort((a, b) => a.time - b.time);
+  const out: Array<{ time: number; kfs: Keyframe[] }> = [];
+  for (const k of sorted) {
+    const last = out[out.length - 1];
+    if (last && Math.abs(k.time - last.time) < epsilonMs) {
+      last.kfs.push(k);
+    } else {
+      out.push({ time: k.time, kfs: [k] });
+    }
+  }
+  return out;
 }

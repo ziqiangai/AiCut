@@ -48,6 +48,8 @@ export class KeyframeOverlay {
       }
     | null = null;
   private capturedPointerId: number | null = null;
+  /** Snap-target threshold in CSS px — the same feel as the timeline. */
+  private static readonly SNAP_PX = 8;
 
   constructor(host: HTMLElement, editor: Editor) {
     this.host = host;
@@ -170,10 +172,21 @@ export class KeyframeOverlay {
     if (this.drag.kind === "translate") {
       const dx = e.clientX - this.drag.pointerStartX;
       const dy = e.clientY - this.drag.pointerStartY;
-      const newPanX = Math.round(this.drag.startPanX + dx);
-      const newPanY = Math.round(this.drag.startPanY + dy);
-      this.editor.setValueAtPlayhead(this.drag.clipId, "panX", newPanX);
-      this.editor.setValueAtPlayhead(this.drag.clipId, "panY", newPanY);
+      const rawPanX = this.drag.startPanX + dx;
+      const rawPanY = this.drag.startPanY + dy;
+      // Snap to: centered (0), and (when content > output) left/right
+      // / top/bottom edge alignment between content and output.
+      const snapped = this.applySnap(this.drag.clipId, rawPanX, rawPanY);
+      this.editor.setValueAtPlayhead(
+        this.drag.clipId,
+        "panX",
+        Math.round(snapped.panX),
+      );
+      this.editor.setValueAtPlayhead(
+        this.drag.clipId,
+        "panY",
+        Math.round(snapped.panY),
+      );
     } else {
       const dist = Math.hypot(
         e.clientX - this.drag.centerX,
@@ -191,6 +204,56 @@ export class KeyframeOverlay {
       );
     }
   };
+
+  /**
+   * Snap raw pan to: centered (panX/Y = 0) and the four edge-alignment
+   * stops (content's L/R/T/B edge flush with the output's matching
+   * edge). When content is smaller than output, the edge stops collapse
+   * to the same point as 0 — harmless dup. Threshold = 8 CSS px.
+   */
+  private applySnap(
+    clipId: string,
+    rawPanX: number,
+    rawPanY: number,
+  ): { panX: number; panY: number } {
+    const out = this.editor.getActiveOutputFrameRect();
+    if (!out) return { panX: rawPanX, panY: rawPanY };
+    const clip = this.findClip(clipId);
+    if (!clip) return { panX: rawPanX, panY: rawPanY };
+    // Content size at current scale (which may differ from base — the
+    // user can be mid-scaling alongside the drag conceptually).
+    const t = (() => {
+      try {
+        const transformer = this.editor.getActiveFrameRect();
+        if (!transformer) return null;
+        return { w: transformer.w, h: transformer.h };
+      } catch {
+        return null;
+      }
+    })();
+    const contentW = t?.w ?? out.w;
+    const contentH = t?.h ?? out.h;
+    // Edge stops: content edge aligned with output edge.
+    //   contentRight = panX + contentW/2 + outCenter.x — but here we
+    //   work in "panX from centered=0", so the edge-alignment panX is
+    //   ±(contentW - outW)/2 (same for Y).
+    const edgeX = (contentW - out.w) / 2;
+    const edgeY = (contentH - out.h) / 2;
+    const xTargets = [0, edgeX, -edgeX];
+    const yTargets = [0, edgeY, -edgeY];
+    const px = nearestSnap(rawPanX, xTargets, KeyframeOverlay.SNAP_PX);
+    const py = nearestSnap(rawPanY, yTargets, KeyframeOverlay.SNAP_PX);
+    return { panX: px, panY: py };
+  }
+
+  private findClip(clipId: string): Clip | null {
+    const project = this.editor.getProject();
+    for (const t of project.tracks) {
+      const c = t.clips.find((cl) => cl.id === clipId);
+      if (c) return c;
+    }
+    return null;
+  }
 
   private onPointerUp = (e: PointerEvent): void => {
     if (!this.drag) return;
@@ -227,7 +290,7 @@ export class KeyframeOverlay {
       return;
     }
     // Output rect = the FIXED stage where the video gets clipped.
-    // The dashed border + body drag-target are anchored here.
+    // The brand-colored border + body drag-target are anchored here.
     const outRect = this.editor.getActiveOutputFrameRect();
     // Content rect = where the video pixels currently land (after
     // transform). Scale handles attach to its corners so they visually
@@ -244,6 +307,21 @@ export class KeyframeOverlay {
       width: `${outRect.w}px`,
       height: `${outRect.h}px`,
     });
+    // Border tint: brand by default; red while the user is actively
+    // dragging AND the content doesn't fully cover the output frame
+    // (i.e. they've panned far enough to expose letterbox). Helps
+    // catch "I dragged my video off-screen by accident."
+    const dragging = this.drag != null;
+    const fullyCovered = contentRect
+      ? contentRect.x <= outRect.x + 0.5 &&
+        contentRect.x + contentRect.w >= outRect.x + outRect.w - 0.5 &&
+        contentRect.y <= outRect.y + 0.5 &&
+        contentRect.y + contentRect.h >= outRect.y + outRect.h - 0.5
+      : true;
+    this.frameBody.classList.toggle(
+      "aicut-keyframe-overlay__frame--warn",
+      dragging && !fullyCovered,
+    );
     const halfHandle = 6;
     const r = contentRect ?? outRect;
     const fbLeft = r.x;
@@ -305,4 +383,22 @@ export class KeyframeOverlay {
     const transform = getEffectiveTransform(clip, playheadLocal);
     return { clip, transform };
   }
+}
+
+/** Pick the snap target within `threshold`, else return the raw value. */
+function nearestSnap(
+  raw: number,
+  targets: number[],
+  threshold: number,
+): number {
+  let best = raw;
+  let bestDist = threshold;
+  for (const t of targets) {
+    const d = Math.abs(raw - t);
+    if (d < bestDist) {
+      bestDist = d;
+      best = t;
+    }
+  }
+  return best;
 }
