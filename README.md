@@ -424,11 +424,11 @@ The script is idempotent — already-published versions are skipped, so a re-run
 - [x] Pluggable `PlaybackEngine` interface (HTML5 default, host can inject)
 - [x] WebCodecs preview engine for frame-accurate seek (`@aicut/core/webcodecs`, PoC: single-track MP4)
 - [x] Density knobs — `timelineHeight` (reactive), `trackHeight`, `rulerHeight` for compact viewports
-- [x] Per-clip keyframe animation (X / Y / Scale; preview-only in v0.6, backend compilation in v0.7)
+- [x] Per-clip keyframe animation (X / Y / Scale) + easing curves (linear / easeIn / easeOut / easeInOut)
+- [x] Backend ffmpeg compilation of keyframes — animated `scale` + `overlay` filter graph with per-frame `t`-expressions, both TS + Go
 - [ ] Speed adjustment (timeline already reserves the slot)
 - [ ] Audio track rendering + waveform thumbnails
 - [ ] WebCodecs engine: multi-track compositing + transitions
-- [ ] Backend ffmpeg compilation of keyframes (v0.7)
 - [ ] Lighting → relighting backend reference
 - [ ] Hosted demo site
 

@@ -1,8 +1,9 @@
 import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import type { Project } from "@aicut/core";
+import type { Clip, Project } from "@aicut/core";
 import { resolveFfmpeg, runFfmpeg } from "./ffmpeg.js";
+import { compileKeyframeExpression } from "./keyframe-expression.js";
 
 export interface RenderOptions {
   width?: number;
@@ -67,21 +68,6 @@ export async function renderProject(
     }
     const sources = new Map(project.sources.map((s) => [s.id, s]));
 
-    // Keyframe transforms (X / Y / scale) are a preview-only feature
-    // in v0.6 — the ffmpeg filtergraph below applies a single static
-    // scale=W:H,pad= per clip and ignores per-frame transforms.
-    // Compiling piecewise-linear expressions into ffmpeg syntax is
-    // tracked for v0.7. Warn so anyone wondering "why doesn't the
-    // export move?" sees the answer in the logs.
-    for (const clip of videoTrack.clips) {
-      if (clip.keyframes && clip.keyframes.length > 0) {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[render] clip ${clip.id}: ignoring ${clip.keyframes.length} keyframe(s) — preview-only in v0.6`,
-        );
-      }
-    }
-
     const totalMs = videoTrack.clips.reduce(
       (acc, c) => acc + (c.out - c.in),
       0,
@@ -115,7 +101,20 @@ export async function renderProject(
         "-movflags",
         "+faststart",
       ];
-      if (opts.width && opts.height) {
+      const hasKeyframes = (clip.keyframes?.length ?? 0) > 0;
+      if (hasKeyframes && opts.width && opts.height) {
+        // Animated path — build a filter_complex that mirrors the
+        // frontend PiP semantics (fixed black bg, animated content
+        // inside). See buildKeyframeFilterComplex for the math.
+        const fc = buildKeyframeFilterComplex(
+          clip,
+          opts.width,
+          opts.height,
+          opts.fps ?? 30,
+          durSec,
+        );
+        args.push("-filter_complex", fc, "-map", "[out]", "-map", "0:a?");
+      } else if (opts.width && opts.height) {
         args.push(
           "-vf",
           `scale=${opts.width}:${opts.height}:force_original_aspect_ratio=decrease,pad=${opts.width}:${opts.height}:(ow-iw)/2:(oh-ih)/2`,
@@ -188,6 +187,50 @@ export async function renderProject(
   } finally {
     await cleanupWork();
   }
+}
+
+/**
+ * Compile a filter_complex graph that applies pan / scale keyframe
+ * animation to a single clip. Mirrors the frontend PiP semantics:
+ *
+ *   1. Fit the source into the output W×H (letterbox, preserve AR).
+ *   2. Scale the fitted content by the animated `scale` expression.
+ *   3. Composite onto a fixed black background, panning via
+ *      animated `panX` / `panY` expressions added to the centered
+ *      anchor.
+ *
+ * Per-frame evaluation is opt-in (`eval=frame`) — without that flag
+ * the expressions evaluate exactly once at filter init.
+ *
+ * Pan note: the frontend stores panX / panY in CSS pixels of the
+ * preview area. This backend treats them as OUTPUT pixels 1:1 — the
+ * cleanest interpretation when we don't know the authoring preview
+ * size. If preview ≠ output dimensions the user may need to scale
+ * pan values; documented in the README under "known limitations".
+ */
+function buildKeyframeFilterComplex(
+  clip: Clip,
+  width: number,
+  height: number,
+  fps: number,
+  durSec: number,
+): string {
+  const kfs = clip.keyframes;
+  // Static base falls through when a prop has no keyframes. Matches
+  // interpolateProp's behavior so the export visual = preview visual.
+  const scaleExpr = compileKeyframeExpression(kfs, "scale", clip.scale ?? 1);
+  const panXExpr = compileKeyframeExpression(kfs, "panX", clip.panX ?? 0);
+  const panYExpr = compileKeyframeExpression(kfs, "panY", clip.panY ?? 0);
+  // Round scaled w/h to even integers — H.264 requires even dims;
+  // ffmpeg will otherwise error with "width not divisible by 2".
+  const wExpr = `trunc(iw*(${scaleExpr})/2)*2`;
+  const hExpr = `trunc(ih*(${scaleExpr})/2)*2`;
+  return [
+    `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,setsar=1[fitted]`,
+    `[fitted]scale=w='${wExpr}':h='${hExpr}':eval=frame[zoomed]`,
+    `color=c=black:s=${width}x${height}:r=${fps}:d=${durSec.toFixed(3)},format=yuv420p[bg]`,
+    `[bg][zoomed]overlay=x='(W-w)/2+(${panXExpr})':y='(H-h)/2+(${panYExpr})':eval=frame:format=auto[out]`,
+  ].join(";");
 }
 
 /**

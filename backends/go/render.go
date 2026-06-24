@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -45,17 +44,6 @@ func renderProject(ctx context.Context, req ExportRequest, outputPath string, on
 		sourcesByID[s.ID] = s
 	}
 
-	// Keyframe transforms (X / Y / scale) are a preview-only feature
-	// in v0.6 — the ffmpeg filtergraph below applies a single static
-	// scale=W:H,pad= per clip and ignores per-frame transforms.
-	// Compiling piecewise-linear expressions into ffmpeg syntax is
-	// tracked for v0.7.
-	for _, clip := range track.Clips {
-		if n := len(clip.Keyframes); n > 0 {
-			log.Printf("[render] clip %s: ignoring %d keyframe(s) — preview-only in v0.6", clip.ID, n)
-		}
-	}
-
 	// Total project duration in ms — denominator for the overall
 	// progress fraction across clips.
 	var totalMs int64
@@ -83,7 +71,23 @@ func renderProject(ctx context.Context, req ExportRequest, outputPath string, on
 			"-c:a", "aac",
 			"-movflags", "+faststart",
 		}
-		if req.Output != nil && req.Output.Width > 0 && req.Output.Height > 0 {
+		hasKeyframes := len(clip.Keyframes) > 0
+		if hasKeyframes && req.Output != nil && req.Output.Width > 0 && req.Output.Height > 0 {
+			// Animated path — filter_complex mirrors the frontend PiP
+			// semantics (fixed black bg, animated content inside). See
+			// buildKeyframeFilterComplex for the math.
+			fps := 30
+			if req.Output.FPS > 0 {
+				fps = req.Output.FPS
+			}
+			durSec := float64(durMs) / 1000.0
+			fc := buildKeyframeFilterComplex(clip, req.Output.Width, req.Output.Height, fps, durSec)
+			args = append(args,
+				"-filter_complex", fc,
+				"-map", "[out]",
+				"-map", "0:a?",
+			)
+		} else if req.Output != nil && req.Output.Width > 0 && req.Output.Height > 0 {
 			w := strconv.Itoa(req.Output.Width)
 			h := strconv.Itoa(req.Output.Height)
 			args = append(args, "-vf",
@@ -169,6 +173,27 @@ func renderProject(ctx context.Context, req ExportRequest, outputPath string, on
 		onProgress(ProgressEvent{Phase: "concat", Overall: 1, TotalClips: totalClips})
 	}
 	return nil
+}
+
+// buildKeyframeFilterComplex compiles a -filter_complex graph that
+// applies pan / scale keyframe animation to a single clip. Mirrors
+// the TS backend's buildKeyframeFilterComplex; both pipe a fitted
+// source through an animated scale into a fixed black background
+// at an animated overlay position. eval=frame is required to
+// re-evaluate the expressions per output frame (default is `init`).
+func buildKeyframeFilterComplex(clip Clip, width, height, fps int, durSec float64) string {
+	scaleExpr := compileKeyframeExpression(clip.Keyframes, "scale", floatOr(clip.Scale, 1))
+	panXExpr := compileKeyframeExpression(clip.Keyframes, "panX", floatOr(clip.PanX, 0))
+	panYExpr := compileKeyframeExpression(clip.Keyframes, "panY", floatOr(clip.PanY, 0))
+	wExpr := fmt.Sprintf("trunc(iw*(%s)/2)*2", scaleExpr)
+	hExpr := fmt.Sprintf("trunc(ih*(%s)/2)*2", scaleExpr)
+	parts := []string{
+		fmt.Sprintf("[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,setsar=1[fitted]", width, height),
+		fmt.Sprintf("[fitted]scale=w='%s':h='%s':eval=frame[zoomed]", wExpr, hExpr),
+		fmt.Sprintf("color=c=black:s=%dx%d:r=%d:d=%s,format=yuv420p[bg]", width, height, fps, strconv.FormatFloat(durSec, 'f', 3, 64)),
+		fmt.Sprintf("[bg][zoomed]overlay=x='(W-w)/2+(%s)':y='(H-h)/2+(%s)':eval=frame:format=auto[out]", panXExpr, panYExpr),
+	}
+	return strings.Join(parts, ";")
 }
 
 func findVideoTrack(p Project) (Track, bool) {
