@@ -50,6 +50,8 @@ test.describe("Keyframes (v4.1)", () => {
     await expect(panel).toBeHidden();
 
     // Click the toolbar at t=1000 → 3 kfs land (panX/panY/scale).
+    // Panel should auto-appear because the toolbar action selects the
+    // new moment (saves the user a second click on the diamond).
     await page.evaluate(() => (window as any).__aicut.api.seek(1000));
     await kfBtn.click();
     const ids = await page.evaluate(() => {
@@ -60,18 +62,12 @@ test.describe("Keyframes (v4.1)", () => {
       return (clip?.keyframes ?? []).map((k: { id: string }) => k.id);
     });
     expect(ids).toHaveLength(3);
-
-    // Programmatically select one of those keyframes (clicking the
-    // canvas diamond is fragile — covered separately).
-    await page.evaluate(
-      ([id]) =>
-        (window as any).__aicut.api.setSelectedKeyframe({
-          clipId: "kf-test-clip",
-          keyframeId: id,
-        }),
-      [ids[0]],
-    );
     await expect(panel).toBeVisible();
+    const autoSelected = await page.evaluate(
+      () => (window as any).__aicut.api.getSelectedKeyframe(),
+    );
+    expect(autoSelected).not.toBeNull();
+    expect(autoSelected.clipId).toBe("kf-test-clip");
 
     // Edit Scale via the panel input → kf at the selected moment
     // gets its value updated.

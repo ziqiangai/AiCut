@@ -155,9 +155,40 @@ export function hitTest(x: number, y: number, ctx: HitContext): HitTarget {
   const track = ctx.project.tracks[ti]!;
   const ms = xToMs(x, ctx.pxPerSec, ctx.scrollLeft, ctx.showHeader);
 
-  // Closest clip whose timeline range contains `ms`, or whose edge is
-  // within HANDLE_PX of the cursor (so resize handles are grabbable
-  // even slightly outside the clip body).
+  // Pass 1 — when keyframes mode is on, scan every clip on the row
+  // for a diamond within KEYFRAME_HIT_RADIUS. Done BEFORE the per-
+  // clip handle / body pass because:
+  //   - A keyframe at the clip's start (clip-local time = 0) sits
+  //     exactly on top of the trim handle's hit zone. Without
+  //     priority here, the handle wins and the keyframe becomes
+  //     unclickable. Common case: user pins the opening pose with
+  //     keyframe at t=0 — exactly what the toolbar button creates.
+  //   - The hit radius (8 px) can also extend slightly outside the
+  //     clip body (e.g. into a small inter-clip gap), so checking
+  //     before the "ms inside clip" branch keeps the kf clickable
+  //     near edges.
+  // Trade-off: while keyframes mode is enabled, dragging the trim
+  // handle of a clip with a kf at t=0 needs you to grab a kf-free
+  // spot first. Acceptable since keyframe editing is the active mode.
+  if (ctx.keyframesEnabled) {
+    for (const clip of track.clips) {
+      if (!clip.keyframes || clip.keyframes.length === 0) continue;
+      const startX = msToXLocal(clip.start, ctx);
+      for (const kf of clip.keyframes) {
+        const kfX = startX + (kf.time / 1000) * ctx.pxPerSec;
+        if (Math.abs(x - kfX) <= KEYFRAME_HIT_RADIUS) {
+          return {
+            kind: "keyframe",
+            trackIndex: ti,
+            clipId: clip.id,
+            keyframeId: kf.id,
+          };
+        }
+      }
+    }
+  }
+
+  // Pass 2 — clip handles + body. Same logic as before.
   for (const clip of track.clips) {
     const start = clip.start;
     const end = clip.start + (clip.out - clip.in);
@@ -171,23 +202,6 @@ export function hitTest(x: number, y: number, ctx: HitContext): HitTarget {
       return { kind: "clip-handle-right", trackIndex: ti, clipId: clip.id };
     }
     if (ms >= start && ms < end) {
-      // Keyframe diamonds beat the clip body — checked AFTER the edge
-      // handles (those are usually small/important) but BEFORE returning
-      // the clip itself, so a click on a diamond never just selects the
-      // parent clip.
-      if (ctx.keyframesEnabled && clip.keyframes && clip.keyframes.length > 0) {
-        for (const kf of clip.keyframes) {
-          const kfX = startX + (kf.time / 1000) * ctx.pxPerSec;
-          if (Math.abs(x - kfX) <= KEYFRAME_HIT_RADIUS) {
-            return {
-              kind: "keyframe",
-              trackIndex: ti,
-              clipId: clip.id,
-              keyframeId: kf.id,
-            };
-          }
-        }
-      }
       return { kind: "clip", trackIndex: ti, clipId: clip.id };
     }
   }

@@ -1250,6 +1250,19 @@ export class Editor implements EditorApi {
       return a.time - b.time;
     });
     cl.keyframes = kfs;
+    // Auto-select the new moment so the left panel pops up
+    // immediately — saves the user a second click. Pick the panX kf
+    // as the deterministic anchor (the moment's grouping logic
+    // doesn't care which sibling is the anchor).
+    const anchor = kfs.find(
+      (k) => k.prop === "panX" && Math.abs(k.time - t) < 16,
+    );
+    if (anchor) {
+      this.selectedKeyframe = { clipId, keyframeId: anchor.id };
+      this.bus.emit("keyframeSelectionChange", {
+        target: this.selectedKeyframe,
+      });
+    }
     this.afterMutation();
     return true;
   }
