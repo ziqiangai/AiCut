@@ -12,6 +12,7 @@
     "dev": "pnpm --filter \"./examples/react-demo\" dev",
     "demo:react": "pnpm --filter \"./examples/react-demo\" dev",
     "demo:vue": "pnpm --filter \"./examples/vue-demo\" dev",
+    "test": "pnpm -r --filter \"./packages/*\" --if-present test",
     "test:e2e": "pnpm --filter \"./e2e\" test",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r exec rm -rf dist node_modules .turbo && rm -rf node_modules",

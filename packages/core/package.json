@@ -40,7 +40,9 @@
     "ai-relighting"
   ],
   "type": "module",
-  "sideEffects": ["./styles/*.css"],
+  "sideEffects": [
+    "./styles/*.css"
+  ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -65,15 +67,20 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "three": "^0.159.0"
   },
   "devDependencies": {
     "@types/three": "^0.159.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "happy-dom": "^20.10.6",
     "tsup": "^8.3.5",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.9"
   },
   "publishConfig": {
     "access": "public"
