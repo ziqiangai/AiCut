@@ -1,5 +1,10 @@
 import { type Locale, mergeLocale } from "../i18n.js";
-import { normalizeProject, projectDuration } from "../model.js";
+import {
+  bigFrameStepMs,
+  frameStepMs,
+  normalizeProject,
+  projectDuration,
+} from "../model.js";
 import type { Clip, Ms, Project } from "../types.js";
 import { ThumbnailRibbon } from "../ui/thumbnails.js";
 import {
@@ -1287,12 +1292,13 @@ export class Timeline {
     this.canvas.style.outline = "none"; // suppress the focus ring
     this.canvas.addEventListener("keydown", (e) => {
       if (e.code !== "ArrowLeft" && e.code !== "ArrowRight") return;
-      // Frame-stepping nav — same constants as EditorUI's handler.
-      // 30 fps assumption (no fps on Project today). Shift = 10×.
+      // Frame-stepping nav — step size derived from Project.fps
+      // (defaults to 30). Same helpers as EditorUI so behavior stays
+      // consistent whether the timeline is embedded or standalone.
       e.preventDefault();
-      const STEP_MS = 33;
-      const BIG_STEP_MS = 333;
-      const step = e.shiftKey ? BIG_STEP_MS : STEP_MS;
+      const step = e.shiftKey
+        ? bigFrameStepMs(this.project)
+        : frameStepMs(this.project);
       const dir = e.code === "ArrowLeft" ? -1 : 1;
       const dur = projectDuration(this.project);
       const next = Math.max(0, Math.min(dur, this.timeMs + dir * step));

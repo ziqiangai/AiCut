@@ -50,11 +50,11 @@ export interface Locale {
 
 /** English. The library default — chosen over Chinese as the OSS norm. */
 export const localeEn: Locale = {
-  undo: "Undo",
-  redo: "Redo",
-  split: "Split",
-  trimLeft: "Trim left edge",
-  trimRight: "Trim right edge",
+  undo: "Undo (⌘Z)",
+  redo: "Redo (⇧⌘Z)",
+  split: "Split (K)",
+  trimLeft: "Trim left edge (Q)",
+  trimRight: "Trim right edge (W)",
   playPause: "Play / Pause (Space)",
   fullscreen: "Fullscreen preview",
   snap: "Snap",
@@ -76,11 +76,11 @@ export const localeEn: Locale = {
 
 /** Simplified Chinese. */
 export const localeZh: Locale = {
-  undo: "撤销",
-  redo: "重做",
-  split: "分割",
-  trimLeft: "向左裁剪",
-  trimRight: "向右裁剪",
+  undo: "撤销 (⌘Z)",
+  redo: "重做 (⇧⌘Z)",
+  split: "分割 (K)",
+  trimLeft: "向左裁剪 (Q)",
+  trimRight: "向右裁剪 (W)",
   playPause: "播放 / 暂停 (Space)",
   fullscreen: "全屏预览",
   snap: "吸附",

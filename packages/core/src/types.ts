@@ -85,6 +85,15 @@ export interface Project {
   version: 1;
   sources: MediaSource[];
   tracks: Track[];
+  /**
+   * Project frame rate. Drives keyboard frame-stepping (← / →), the
+   * future timecode display, and ffmpeg compilation of keyframe
+   * animations. Optional for back-compat — projects without `fps`
+   * default to 30, matching consumer NLE convention (CapCut /
+   * Premiere project defaults). `normalizeProject` does NOT fill
+   * this in, so a missing field stays missing through round-trips.
+   */
+  fps?: number;
 }
 
 /**

@@ -1363,6 +1363,7 @@ export class Editor implements EditorApi {
     const prev = this.history.undo(this.project);
     if (!prev) return false;
     this.project = prev;
+    this.reconcileSelectionsWithProject();
     this.engine.setProject(this.project);
     this.bus.emit("change", { project: this.getProject() });
     this.emitHistory();
@@ -1374,11 +1375,42 @@ export class Editor implements EditorApi {
     const next = this.history.redo(this.project);
     if (!next) return false;
     this.project = next;
+    this.reconcileSelectionsWithProject();
     this.engine.setProject(this.project);
     this.bus.emit("change", { project: this.getProject() });
     this.emitHistory();
     this.ui.render();
     return true;
+  }
+
+  /**
+   * Selections (clipId + selectedKeyframe) live OUTSIDE the project
+   * snapshot, so undo / redo can leave them pointing at ids that no
+   * longer exist. Defend against dangling refs by clearing anything
+   * the restored project doesn't actually contain — and emit the
+   * paired change events so panels / overlays hide cleanly instead
+   * of holding zombie references.
+   */
+  private reconcileSelectionsWithProject(): void {
+    if (this.selectedKeyframe) {
+      const trk = findTrackOfClip(this.project, this.selectedKeyframe.clipId);
+      const cl = trk?.clips.find((c) => c.id === this.selectedKeyframe!.clipId);
+      const kf = cl?.keyframes?.find(
+        (k) => k.id === this.selectedKeyframe!.keyframeId,
+      );
+      if (!kf) {
+        this.selectedKeyframe = null;
+        this.bus.emit("keyframeSelectionChange", { target: null });
+      }
+    }
+    if (this.selectedClipId) {
+      const trk = findTrackOfClip(this.project, this.selectedClipId);
+      const cl = trk?.clips.find((c) => c.id === this.selectedClipId);
+      if (!cl) {
+        this.selectedClipId = null;
+        this.bus.emit("selectionChange", { clipId: null });
+      }
+    }
   }
 
   // ---- events ---------------------------------------------------------

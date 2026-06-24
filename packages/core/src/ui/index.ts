@@ -1,4 +1,10 @@
-import { clipDuration, findClipContaining, findTrackOfClip } from "../model.js";
+import {
+  bigFrameStepMs,
+  clipDuration,
+  findClipContaining,
+  findTrackOfClip,
+  frameStepMs,
+} from "../model.js";
 import type { Editor } from "../editor.js";
 import { Timeline } from "../timeline/index.js";
 import type { Clip, Ms } from "../types.js";
@@ -405,13 +411,12 @@ export class EditorUI {
       } else if (e.code === "ArrowLeft" || e.code === "ArrowRight") {
         // Frame-stepping nav — matches Premiere / Final Cut / CapCut /
         // After Effects: ← / → = one frame, Shift+← / → = 10 frames.
-        // No fps on Project today, so we assume 30 fps and use 33 ms
-        // (a sub-frame value never looks "wrong" because the playhead
-        // snaps to whatever the engine renders at the new time).
+        // Step size derived from Project.fps (defaults to 30 when
+        // unset) so a 60 fps project nudges in half-frames relative
+        // to a 30 fps one.
         e.preventDefault();
-        const STEP_MS = 33; // ~1 frame @ 30 fps
-        const BIG_STEP_MS = 333; // ~10 frames @ 30 fps
-        const step = e.shiftKey ? BIG_STEP_MS : STEP_MS;
+        const project = this.editor.getProject();
+        const step = e.shiftKey ? bigFrameStepMs(project) : frameStepMs(project);
         const dir = e.code === "ArrowLeft" ? -1 : 1;
         const next = Math.max(
           0,

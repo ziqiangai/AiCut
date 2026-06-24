@@ -4,6 +4,32 @@ import type { Clip, Keyframe, KeyframeProp, Ms, Project, Track } from "./types.j
 
 const KEYFRAME_PROPS: KeyframeProp[] = ["panX", "panY", "scale"];
 
+/**
+ * Default frame rate when a project has no `fps`. 30 matches CapCut /
+ * Premiere "new project" defaults. Changing this is a project-wide
+ * UX shift — the user should opt in via `Project.fps`.
+ */
+export const DEFAULT_FPS = 30;
+/** Shift + arrow nudges this many frames at once. */
+export const BIG_FRAME_STEP = 10;
+
+/** Project's effective fps — falls back to the default when unset. */
+export function projectFps(project: Project): number {
+  const f = project.fps;
+  return f != null && f > 0 ? f : DEFAULT_FPS;
+}
+
+/** Milliseconds per frame at the project's fps. Rounded to integer ms
+ *  because the playhead is integer-ms and we don't want sub-ms drift. */
+export function frameStepMs(project: Project): number {
+  return Math.max(1, Math.round(1000 / projectFps(project)));
+}
+
+/** Milliseconds for a shift+arrow nudge (one "big step" = N frames). */
+export function bigFrameStepMs(project: Project): number {
+  return Math.max(1, Math.round((BIG_FRAME_STEP * 1000) / projectFps(project)));
+}
+
 export function createEmptyProject(): Project {
   return {
     version: 1,
