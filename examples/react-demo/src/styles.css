@@ -549,3 +549,8 @@ body,
 .ldemo-generate:hover {
   background: color-mix(in srgb, var(--color-brand, #ff3386) 88%, black);
 }
+
+@keyframes aicut-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.75); }
+}

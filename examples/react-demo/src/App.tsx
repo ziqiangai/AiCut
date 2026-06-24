@@ -252,48 +252,33 @@ function ExportPopover(props: {
     >
       <div style={{ fontWeight: 600, fontSize: 13 }}>导出设置</div>
       <Row label="比例">
-        <select
-          data-testid="demo-export-aspect"
+        <PopoverSelect
+          testId="demo-export-aspect"
           value={props.aspect}
-          onChange={(e) =>
-            props.onChangeAspect(e.target.value as ExportAspectKey)
-          }
-          style={popoverSelectStyle}
-        >
-          {(Object.keys(props.resolutions) as ExportAspectKey[]).map((a) => (
-            <option key={a} value={a}>
-              {a}
-            </option>
-          ))}
-        </select>
+          options={(Object.keys(props.resolutions) as ExportAspectKey[]).map(
+            (a) => ({ value: a, label: a }),
+          )}
+          onChange={(v) => props.onChangeAspect(v)}
+        />
       </Row>
       <Row label="分辨率">
-        <select
-          data-testid="demo-export-resolution"
+        <PopoverSelect
+          testId="demo-export-resolution"
           value={props.resIdx}
-          onChange={(e) => props.onChangeResIdx(Number(e.target.value))}
-          style={popoverSelectStyle}
-        >
-          {opts.map((r, i) => (
-            <option key={r.label} value={i}>
-              {r.label}
-            </option>
-          ))}
-        </select>
+          options={opts.map((r, i) => ({ value: i, label: r.label }))}
+          onChange={(v) => props.onChangeResIdx(v)}
+        />
       </Row>
       <Row label="帧率">
-        <select
-          data-testid="demo-export-fps"
+        <PopoverSelect
+          testId="demo-export-fps"
           value={props.fps}
-          onChange={(e) => props.onChangeFps(Number(e.target.value))}
-          style={popoverSelectStyle}
-        >
-          {props.fpsOptions.map((f) => (
-            <option key={f} value={f}>
-              {f} fps
-            </option>
-          ))}
-        </select>
+          options={props.fpsOptions.map((f) => ({
+            value: f,
+            label: `${f} fps`,
+          }))}
+          onChange={(v) => props.onChangeFps(v)}
+        />
       </Row>
       <div
         style={{
@@ -348,20 +333,184 @@ function Row(props: { label: string; children: ReactNode }) {
   );
 }
 
-const popoverSelectStyle: CSSProperties = {
-  minWidth: 140,
-  height: 28,
-  padding: "0 8px",
-  borderRadius: 6,
-  border:
-    "1px solid var(--aicut-controls-border, rgba(255,255,255,0.16))",
-  background:
-    "var(--aicut-controls-hover, rgba(255,255,255,0.06))",
-  color: "inherit",
-  fontFamily: "inherit",
-  fontSize: 12,
-  appearance: "none",
-};
+/**
+ * Custom themed select — button trigger + floating menu. Native
+ * <select> dropdowns are OS-painted (foreign font, no theme), which
+ * looked off inside the export popover. This keeps the value type
+ * generic so we can use it for strings (aspect) or numbers (resIdx,
+ * fps) without coercion.
+ *
+ * Click-outside / Esc closes; selected item gets the brand color +
+ * a CSS checkmark. Nests fine inside an outer popover because the
+ * outer's "click-inside-me-doesn't-close" check still passes —
+ * clicking on the trigger / menu items lands inside the OUTER ref.
+ */
+function PopoverSelect<T extends string | number>(props: {
+  value: T;
+  options: Array<{ value: T; label: string }>;
+  onChange: (v: T) => void;
+  testId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const handle = requestAnimationFrame(() => {
+      document.addEventListener("click", onDocClick, true);
+      document.addEventListener("keydown", onKey);
+    });
+    return () => {
+      cancelAnimationFrame(handle);
+      document.removeEventListener("click", onDocClick, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const current = props.options.find((o) => o.value === props.value);
+  return (
+    <div
+      ref={ref}
+      style={{ position: "relative", display: "inline-block", minWidth: 140 }}
+      data-testid={props.testId}
+    >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        style={{
+          width: "100%",
+          height: 28,
+          padding: "0 26px 0 10px",
+          textAlign: "left",
+          background:
+            "var(--aicut-controls-hover, rgba(255,255,255,0.06))",
+          border:
+            "1px solid " +
+            (open
+              ? "var(--color-brand, #ff3386)"
+              : "var(--aicut-controls-border, rgba(255,255,255,0.16))"),
+          borderRadius: 6,
+          color: "inherit",
+          fontFamily: "inherit",
+          fontSize: 12,
+          cursor: "pointer",
+          position: "relative",
+          boxShadow: open ? "0 0 0 2px rgba(255,51,134,0.22)" : undefined,
+          transition: "border-color 120ms ease-out, box-shadow 120ms ease-out",
+        }}
+      >
+        <span
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            display: "block",
+          }}
+        >
+          {current?.label ?? ""}
+        </span>
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            right: 9,
+            top: "50%",
+            width: 0,
+            height: 0,
+            borderLeft: "4px solid transparent",
+            borderRight: "4px solid transparent",
+            borderTop: "5px solid currentColor",
+            marginTop: -2,
+            opacity: 0.75,
+            transform: open ? "rotate(180deg)" : "none",
+            transformOrigin: "50% 35%",
+            color: open ? "var(--color-brand, #ff3386)" : "currentColor",
+            transition: "transform 120ms ease-out",
+          }}
+        />
+      </button>
+      {open ? (
+        <ul
+          role="listbox"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            margin: 0,
+            padding: 4,
+            listStyle: "none",
+            background: "var(--aicut-controls-bg, #1a1a1d)",
+            border:
+              "1px solid var(--aicut-controls-border, rgba(255,255,255,0.16))",
+            borderRadius: 6,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.32)",
+            zIndex: 200,
+            maxHeight: 240,
+            overflowY: "auto",
+          }}
+        >
+          {props.options.map((opt) => {
+            const selected = opt.value === props.value;
+            return (
+              <li
+                key={String(opt.value)}
+                role="option"
+                aria-selected={selected}
+                onClick={() => {
+                  props.onChange(opt.value);
+                  setOpen(false);
+                }}
+                style={{
+                  padding: "6px 10px 6px 24px",
+                  position: "relative",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  color: selected
+                    ? "var(--color-brand, #ff3386)"
+                    : "inherit",
+                  background: "transparent",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background =
+                    "var(--aicut-controls-active, rgba(255,255,255,0.1))";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                }}
+              >
+                {selected ? (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      position: "absolute",
+                      left: 8,
+                      top: "50%",
+                      width: 4,
+                      height: 8,
+                      marginTop: -5,
+                      borderRight: "2px solid currentColor",
+                      borderBottom: "2px solid currentColor",
+                      transform: "rotate(45deg)",
+                    }}
+                  />
+                ) : null}
+                {opt.label}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
 
 // Mirror .aicut-icon-btn chrome exactly — same height, radius, no
 // border, background tints on hover. Using `appearance: none` on the
@@ -410,6 +559,85 @@ interface ExportStatus {
   totalClips?: number;
   fileUrl?: string;
   error?: string;
+}
+
+/**
+ * Compact live indicator that takes the timeline-toolbar's right
+ * slot (where the "导出" button used to live). Renders empty when
+ * idle, a brand-tinted progress pill while encoding/concatenating,
+ * and an error chip if the last export failed. The full status
+ * card with the file link is still in the sidebar; this is just
+ * the at-a-glance progress so the user doesn't have to look away
+ * from the timeline while waiting.
+ */
+function ExportStatusPill({ status }: { status: ExportStatus }) {
+  if (status.running) {
+    const pct = Math.round((status.overall ?? 0) * 100);
+    const label =
+      status.phase === "concat"
+        ? `合并中 ${pct}%`
+        : status.totalClips != null && status.clipIndex != null
+          ? `编码 ${status.clipIndex + 1}/${status.totalClips} · ${pct}%`
+          : `编码中 ${pct}%`;
+    return (
+      <span
+        data-testid="demo-export-pill"
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 8,
+          height: 24,
+          padding: "0 10px",
+          borderRadius: 12,
+          fontSize: 11,
+          lineHeight: 1,
+          fontVariantNumeric: "tabular-nums",
+          color: "var(--color-brand, #ff3386)",
+          background: "rgba(255,51,134,0.10)",
+          border: "1px solid rgba(255,51,134,0.32)",
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            display: "inline-block",
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            background: "var(--color-brand, #ff3386)",
+            animation: "aicut-pulse 1.2s ease-in-out infinite",
+          }}
+        />
+        {label}
+      </span>
+    );
+  }
+  if (status.error) {
+    return (
+      <span
+        data-testid="demo-export-pill-error"
+        title={status.error}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          height: 24,
+          padding: "0 10px",
+          borderRadius: 12,
+          fontSize: 11,
+          color: "#ff3b30",
+          background: "rgba(255,59,48,0.10)",
+          border: "1px solid rgba(255,59,48,0.32)",
+          maxWidth: 280,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        导出失败 — {status.error}
+      </span>
+    );
+  }
+  return null;
 }
 
 const BACKENDS = {
@@ -675,19 +903,62 @@ export function App() {
                 >
                   Share
                 </button>
-                <button
-                  type="button"
-                  className="demo-slot-btn"
-                  data-testid="demo-header-export"
-                  onClick={() => apiRef.current?.requestExport()}
-                  style={{
-                    ...demoSlotBtnStyle,
-                    background: "var(--color-brand, #ff3386)",
-                    color: "#fff",
-                  }}
-                >
-                  Export
-                </button>
+                <span style={{ position: "relative", display: "inline-block" }}>
+                  <button
+                    type="button"
+                    className="demo-slot-btn"
+                    data-testid="demo-header-export"
+                    disabled={exportStatus.running}
+                    onClick={() => setExportPopoverOpen((v) => !v)}
+                    style={{
+                      ...demoSlotBtnStyle,
+                      background: exportStatus.running
+                        ? "var(--aicut-controls-hover, rgba(255,255,255,0.08))"
+                        : "var(--color-brand, #ff3386)",
+                      color: exportStatus.running
+                        ? "var(--aicut-controls-text, rgba(255,255,255,0.6))"
+                        : "#fff",
+                      cursor: exportStatus.running ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {exportStatus.running ? "导出中…" : "Export"}
+                  </button>
+                  {exportPopoverOpen && !exportStatus.running ? (
+                    <ExportPopover
+                      aspect={exportAspect}
+                      resIdx={exportResIdx}
+                      fps={exportFps}
+                      onChangeAspect={(a) => {
+                        setExportAspect(a);
+                        setExportResIdx((i) =>
+                          Math.min(i, RESOLUTIONS[a].length - 1),
+                        );
+                      }}
+                      onChangeResIdx={setExportResIdx}
+                      onChangeFps={setExportFps}
+                      onCancel={() => setExportPopoverOpen(false)}
+                      onConfirm={() => {
+                        const api = apiRef.current;
+                        if (!api) {
+                          setExportStatus({
+                            running: false,
+                            error: "Editor API not ready yet",
+                          });
+                          return;
+                        }
+                        setExportPopoverOpen(false);
+                        setExportStatus({
+                          running: true,
+                          overall: 0,
+                          phase: "encode",
+                        });
+                        api.requestExport();
+                      }}
+                      resolutions={RESOLUTIONS}
+                      fpsOptions={FPS_OPTIONS}
+                    />
+                  ) : null}
+                </span>
               </>
             ) : null
           }
@@ -713,58 +984,7 @@ export function App() {
           }
           toolbarRight={
             showToolbarRight ? (
-              <span style={{ position: "relative", display: "inline-block" }}>
-                <button
-                  type="button"
-                  data-testid="demo-export"
-                  className="demo-slot-btn"
-                  disabled={exportStatus.running}
-                  onClick={() => setExportPopoverOpen((v) => !v)}
-                  style={demoSlotBtnStyle}
-                >
-                  {exportStatus.running ? "导出中…" : "导出"}
-                </button>
-                {exportPopoverOpen && !exportStatus.running ? (
-                  <ExportPopover
-                    aspect={exportAspect}
-                    resIdx={exportResIdx}
-                    fps={exportFps}
-                    onChangeAspect={(a) => {
-                      setExportAspect(a);
-                      // Clamp the resolution index to the new aspect's
-                      // option count so we don't dangle past the array.
-                      setExportResIdx((i) =>
-                        Math.min(i, RESOLUTIONS[a].length - 1),
-                      );
-                    }}
-                    onChangeResIdx={setExportResIdx}
-                    onChangeFps={setExportFps}
-                    onCancel={() => setExportPopoverOpen(false)}
-                    onConfirm={() => {
-                      const api = apiRef.current;
-                      if (!api) {
-                        setExportStatus({
-                          running: false,
-                          error: "Editor API not ready yet",
-                        });
-                        return;
-                      }
-                      setExportPopoverOpen(false);
-                      setExportStatus({
-                        running: true,
-                        overall: 0,
-                        phase: "encode",
-                      });
-                      // requestExport fires the editor's `export` event
-                      // synchronously; onExport (below) closes over the
-                      // current export* state and posts with those dims.
-                      api.requestExport();
-                    }}
-                    resolutions={RESOLUTIONS}
-                    fpsOptions={FPS_OPTIONS}
-                  />
-                ) : null}
-              </span>
+              <ExportStatusPill status={exportStatus} />
             ) : null
           }
           onReady={(api) => {
