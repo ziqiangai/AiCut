@@ -620,12 +620,74 @@ export class CanvasCompositorEngine implements PlaybackEngine {
   getFrameRect(
     clipId?: string,
   ): { x: number; y: number; w: number; h: number } | null {
-    // PiP-aware: when a specific clip is asked about, return that
-    // clip's cached rect. Without a clipId, fall back to the primary
-    // (= bottom track) — the historical single-clip behaviour.
     const id = clipId ?? this.primaryClipIdLastPaint;
     if (id == null) return null;
-    return this.frameRectsByClip.get(id) ?? null;
+    // Compute on demand from the LIVE project state instead of
+    // returning the paint-cache value. Paint runs in its own rAF
+    // tick, so the overlay was reading a frame rect that lagged the
+    // actual project by one tick — which manifested as a brief
+    // "jump" of the dashed selection border when a drag updated
+    // scale + panX in the same tick. Recomputing here keeps the
+    // overlay in lockstep with the keyframe model.
+    const live = this.computeFrameRect(id);
+    return live ?? this.frameRectsByClip.get(id) ?? null;
+  }
+
+  /**
+   * Compute a clip's content rect (CSS px in host coords) from the
+   * LIVE project state — no paint cache involvement. Mirrors the
+   * math in `paint()` so visible canvas pixels and overlay handles
+   * agree to within float precision.
+   */
+  private computeFrameRect(
+    clipId: string,
+  ): { x: number; y: number; w: number; h: number } | null {
+    let clip: Clip | null = null;
+    for (const track of this.project.tracks) {
+      const c = track.clips.find((cc) => cc.id === clipId);
+      if (c) {
+        clip = c;
+        break;
+      }
+    }
+    if (!clip) return null;
+    const v = this.videos.get(clip.sourceId);
+    if (!v || v.videoWidth === 0 || v.videoHeight === 0) return null;
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+    if (cw === 0 || ch === 0) return null;
+    const projAspect = parseAspect(this.project.aspect);
+    let aw: number;
+    let ah: number;
+    if (projAspect) {
+      [aw, ah] = projAspect;
+    } else {
+      const ref = this.canvasReferenceDims();
+      if (ref) {
+        [aw, ah] = ref;
+      } else {
+        aw = v.videoWidth;
+        ah = v.videoHeight;
+      }
+    }
+    const canvasScale = Math.min(cw / aw, ch / ah);
+    const dw = aw * canvasScale;
+    const dh = ah * canvasScale;
+    const dpr = window.devicePixelRatio || 1;
+    const vidContain = Math.min(dw / v.videoWidth, dh / v.videoHeight);
+    const vidW = v.videoWidth * vidContain;
+    const vidH = v.videoHeight * vidContain;
+    const t = getEffectiveTransform(clip, this.timeMs - clip.start);
+    const cssCx = cw / (2 * dpr) + t.panX;
+    const cssCy = ch / (2 * dpr) + t.panY;
+    const cssW = (vidW * t.scale) / dpr;
+    const cssH = (vidH * t.scale) / dpr;
+    return {
+      x: cssCx - cssW / 2,
+      y: cssCy - cssH / 2,
+      w: cssW,
+      h: cssH,
+    };
   }
 
   private updateBadge(): void {
