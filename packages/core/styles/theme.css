@@ -476,6 +476,31 @@
   cursor: nesw-resize;
 }
 
+/* Edge midpoint handles — slimmer rectangles so they read as "edge
+   grip" instead of "corner grip", and so they don't visually fight
+   the corner handles when they sit close together on a small PiP. */
+.aicut-keyframe-overlay__handle--edge {
+  width: 18px;
+  height: 6px;
+  border-radius: 4px;
+}
+
+.aicut-keyframe-overlay__handle--l,
+.aicut-keyframe-overlay__handle--r {
+  width: 6px;
+  height: 18px;
+}
+
+.aicut-keyframe-overlay__handle--t,
+.aicut-keyframe-overlay__handle--b {
+  cursor: ns-resize;
+}
+
+.aicut-keyframe-overlay__handle--l,
+.aicut-keyframe-overlay__handle--r {
+  cursor: ew-resize;
+}
+
 .aicut-fullscreen-exit {
   position: absolute;
   top: 16px;

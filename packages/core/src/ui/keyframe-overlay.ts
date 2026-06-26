@@ -3,6 +3,16 @@ import { getEffectiveTransform } from "../keyframes/index.js";
 import type { Clip } from "../types.js";
 
 /**
+ * Eight resize handles: 4 corners (tl/tr/bl/br) + 4 edge midpoints
+ * (t/r/b/l). Corners resize both dimensions; edges resize only the
+ * perpendicular dimension. Aspect is locked either way (single
+ * `scale` value on the clip), so a horizontal edge drag still
+ * changes the clip's height proportionally — same posture as
+ * shift-resize in any graphics editor.
+ */
+type HandleKind = "tl" | "tr" | "bl" | "br" | "t" | "r" | "b" | "l";
+
+/**
  * Direct-manipulation overlay on top of the preview area. When
  * keyframes mode is on AND the active engine exposes a frame rect,
  * paints a 1px dashed border around the OUTPUT frame (fixed) + four
@@ -37,7 +47,7 @@ export class KeyframeOverlay {
    *  rect. Doubles as the drag-to-pan hit target when keyframes mode
    *  is on; corner handles attach to its bounds. */
   private frameBody: HTMLDivElement;
-  private handles: Record<"tl" | "tr" | "bl" | "br", HTMLDivElement>;
+  private handles: Record<HandleKind, HTMLDivElement>;
   private rafHandle: number | null = null;
   private destroyed = false;
   private drag:
@@ -52,12 +62,19 @@ export class KeyframeOverlay {
     | {
         kind: "scale";
         clipId: string;
-        /** Viewport coords of the OPPOSITE corner — stays fixed. */
+        /** Viewport coords of the anchored point — stays fixed. For
+         *  corner drags this is the opposite corner; for edge drags
+         *  it's the opposite edge's midpoint. */
         anchorX: number;
         anchorY: number;
-        /** Direction from anchor to dragged corner. -1 or +1 per axis. */
+        /** Direction from anchor to dragged corner / edge. ±1 per axis. */
         dirX: 1 | -1;
         dirY: 1 | -1;
+        /** Per-axis projection mask: corners use both (1, 1); edge
+         *  handles only consume the perpendicular axis so a top-edge
+         *  drag ignores horizontal cursor motion. */
+        axisX: 0 | 1;
+        axisY: 0 | 1;
         /** Content dims when scale = 1, in viewport CSS px. */
         baseW: number;
         baseH: number;
@@ -106,6 +123,10 @@ export class KeyframeOverlay {
       tr: this.makeHandle("tr"),
       bl: this.makeHandle("bl"),
       br: this.makeHandle("br"),
+      t: this.makeHandle("t"),
+      r: this.makeHandle("r"),
+      b: this.makeHandle("b"),
+      l: this.makeHandle("l"),
     };
 
     host.appendChild(this.root);
@@ -190,32 +211,64 @@ export class KeyframeOverlay {
 
   // ---- corner-handle drag (scale) --------------------------------------
 
-  private onScaleStart(corner: "tl" | "tr" | "bl" | "br", e: PointerEvent): void {
+  private onScaleStart(handle: HandleKind, e: PointerEvent): void {
     if (e.button !== 0) return;
     const ctx = this.ensureSelectedClip();
     if (!ctx) return;
     e.preventDefault();
     e.stopPropagation();
-    // CapCut-style corner drag: the OPPOSITE corner stays pinned;
-    // the dragged corner follows the cursor. Aspect is locked
-    // (single-scale model), so the dragged corner snaps along the
-    // larger axis when the cursor goes off-diagonal.
+    // CapCut-style anchored resize: the OPPOSITE corner / edge stays
+    // pinned. For edge handles the anchor is the parallel edge — the
+    // dragged edge moves only along its perpendicular axis but the
+    // perpendicular axis still drives a uniform scale, so the
+    // dragged edge follows the cursor along its drag axis and the
+    // perpendicular axis grows / shrinks in tandem.
     const clipRect = this.editor.getActiveFrameRect();
     const outRect = this.editor.getActiveOutputFrameRect();
     if (!clipRect || !outRect) return;
     const hostRect = this.host.getBoundingClientRect();
 
-    const isRightAnchor = corner === "tl" || corner === "bl";
-    const isBottomAnchor = corner === "tl" || corner === "tr";
-    const anchorX =
-      hostRect.left + clipRect.x + (isRightAnchor ? clipRect.w : 0);
-    const anchorY =
-      hostRect.top + clipRect.y + (isBottomAnchor ? clipRect.h : 0);
-    const dirX: 1 | -1 = isRightAnchor ? -1 : 1;
-    const dirY: 1 | -1 = isBottomAnchor ? -1 : 1;
+    // Edge handles ignore one axis entirely. For top edge, anchor =
+    // bottom edge midpoint; for left edge, anchor = right edge
+    // midpoint; etc. Corner handles anchor the opposite corner.
+    const touchesTop = handle === "tl" || handle === "tr" || handle === "t";
+    const touchesBottom = handle === "bl" || handle === "br" || handle === "b";
+    const touchesLeft = handle === "tl" || handle === "bl" || handle === "l";
+    const touchesRight = handle === "tr" || handle === "br" || handle === "r";
+    // Anchor goes to the OPPOSITE side of whatever the handle
+    // touches. When the handle doesn't touch a given side (e.g. the
+    // "t" edge handle is on top but doesn't touch left/right), the
+    // anchor along that axis sits at the clip CENTER — i.e. that
+    // axis is shared 50/50 across the resize, mirroring the edge
+    // expansion symmetrically.
+    let anchorOffsetX: number;
+    let dirX: 1 | -1;
+    if (touchesLeft) {
+      anchorOffsetX = clipRect.w; // anchor at right edge
+      dirX = -1;
+    } else if (touchesRight) {
+      anchorOffsetX = 0; // anchor at left edge
+      dirX = 1;
+    } else {
+      anchorOffsetX = clipRect.w / 2; // anchor at horizontal center
+      dirX = 1; // unused for edge handles' projection
+    }
+    let anchorOffsetY: number;
+    let dirY: 1 | -1;
+    if (touchesTop) {
+      anchorOffsetY = clipRect.h;
+      dirY = -1;
+    } else if (touchesBottom) {
+      anchorOffsetY = 0;
+      dirY = 1;
+    } else {
+      anchorOffsetY = clipRect.h / 2;
+      dirY = 1;
+    }
+    const anchorX = hostRect.left + clipRect.x + anchorOffsetX;
+    const anchorY = hostRect.top + clipRect.y + anchorOffsetY;
 
-    // Base content size at scale = 1. Derived from the current
-    // post-transform content rect: contentW = baseW × currentScale.
+    // Base content size at scale = 1.
     const baseW = clipRect.w / ctx.transform.scale;
     const baseH = clipRect.h / ctx.transform.scale;
     if (baseW < 1 || baseH < 1) return;
@@ -223,9 +276,11 @@ export class KeyframeOverlay {
     const canvasCenterX = hostRect.left + outRect.x + outRect.w / 2;
     const canvasCenterY = hostRect.top + outRect.y + outRect.h / 2;
 
-    const target = this.handles[corner];
+    const target = this.handles[handle];
     target.setPointerCapture(e.pointerId);
     this.capturedPointerId = e.pointerId;
+    const axisX: 0 | 1 = touchesLeft || touchesRight ? 1 : 0;
+    const axisY: 0 | 1 = touchesTop || touchesBottom ? 1 : 0;
     this.drag = {
       kind: "scale",
       clipId: ctx.clip.id,
@@ -233,6 +288,8 @@ export class KeyframeOverlay {
       anchorY,
       dirX,
       dirY,
+      axisX,
+      axisY,
       baseW,
       baseH,
       canvasCenterX,
@@ -266,43 +323,43 @@ export class KeyframeOverlay {
       );
     } else {
       // Corner resize with the OPPOSITE corner anchored. Aspect is
-      // locked (we only have one `scale` value); the dragged corner
-      // tracks the larger of the two cursor offsets so the clip
-      // always grows along the dominant axis the user is pulling.
-      // Cursor offset along each axis, clamped to the original
-      // direction so dragging past the anchor just shrinks instead
-      // of mirror-flipping the clip.
+      // locked (single `scale` value); we project the cursor's
+      // displacement from the anchor onto the natural diagonal
+      // direction (baseW, baseH). This gives a smooth, jitter-free
+      // scale that doesn't flicker between axes the way max(sx, sy)
+      // does when the cursor wanders slightly off-diagonal — the
+      // opposite corner stays pinned to within float-rounding noise
+      // instead of bouncing by a pixel each frame.
       const offsetX = (e.clientX - this.drag.anchorX) * this.drag.dirX;
       const offsetY = (e.clientY - this.drag.anchorY) * this.drag.dirY;
-      const wConstrained = Math.max(0, offsetX);
-      const hConstrained = Math.max(0, offsetY);
-      const sx = wConstrained / this.drag.baseW;
-      const sy = hConstrained / this.drag.baseH;
-      const next = Math.max(0.05, Math.min(16, Math.max(sx, sy)));
+      // Mask out axes the handle isn't supposed to consume (edge
+      // handles only listen to the perpendicular axis). For corners
+      // axisX = axisY = 1, so this is a no-op.
+      const projX = offsetX * this.drag.axisX;
+      const projY = offsetY * this.drag.axisY;
+      // Effective base length along the active axes. For an edge
+      // handle this collapses to a single axis; for a corner it's
+      // the natural diagonal. Either way the scale comes out as the
+      // ratio along that axis, which is exactly the
+      // opposite-anchor-stays-pinned semantics.
+      const activeBaseW = this.drag.baseW * this.drag.axisX;
+      const activeBaseH = this.drag.baseH * this.drag.axisY;
+      const L = Math.hypot(activeBaseW, activeBaseH) || 1;
+      const proj = (projX * activeBaseW + projY * activeBaseH) / L;
+      const next = Math.max(0.05, Math.min(16, proj / L));
       const newW = this.drag.baseW * next;
       const newH = this.drag.baseH * next;
-      // New clip center sits halfway between anchor and the new
-      // (now-shifted) dragged corner — that keeps the anchor pinned
-      // while the opposite side scales to follow the cursor.
       const newCenterX = this.drag.anchorX + this.drag.dirX * (newW / 2);
       const newCenterY = this.drag.anchorY + this.drag.dirY * (newH / 2);
+      // Don't round pan offsets here — quantising them to integers
+      // would let the anchored corner jitter as scale grows
+      // continuously. Storage precision is fine for floats and the
+      // editor commits one history entry per drag anyway.
       const newPanX = newCenterX - this.drag.canvasCenterX;
       const newPanY = newCenterY - this.drag.canvasCenterY;
-      this.editor.setValueAtPlayhead(
-        this.drag.clipId,
-        "scale",
-        Math.round(next * 100) / 100,
-      );
-      this.editor.setValueAtPlayhead(
-        this.drag.clipId,
-        "panX",
-        Math.round(newPanX),
-      );
-      this.editor.setValueAtPlayhead(
-        this.drag.clipId,
-        "panY",
-        Math.round(newPanY),
-      );
+      this.editor.setValueAtPlayhead(this.drag.clipId, "scale", next);
+      this.editor.setValueAtPlayhead(this.drag.clipId, "panX", newPanX);
+      this.editor.setValueAtPlayhead(this.drag.clipId, "panY", newPanY);
     }
   };
 
@@ -471,24 +528,33 @@ export class KeyframeOverlay {
       "aicut-keyframe-overlay__frame--warn",
       !fullyCovered,
     );
-    const halfHandle = 6;
     const r = contentRect ?? outRect;
     const fbLeft = r.x;
     const fbTop = r.y;
     const fbRight = r.x + r.w;
     const fbBottom = r.y + r.h;
+    // Handle half-dim (px): corners are 12×12 squares, top/bottom
+    // edges 18×6, left/right edges 6×18 — keep in sync with the CSS.
     const place = (
       el: HTMLDivElement,
       cx: number,
       cy: number,
+      halfW: number,
+      halfH: number,
     ): void => {
-      el.style.left = `${cx - halfHandle}px`;
-      el.style.top = `${cy - halfHandle}px`;
+      el.style.left = `${cx - halfW}px`;
+      el.style.top = `${cy - halfH}px`;
     };
-    place(this.handles.tl, fbLeft, fbTop);
-    place(this.handles.tr, fbRight, fbTop);
-    place(this.handles.bl, fbLeft, fbBottom);
-    place(this.handles.br, fbRight, fbBottom);
+    place(this.handles.tl, fbLeft, fbTop, 6, 6);
+    place(this.handles.tr, fbRight, fbTop, 6, 6);
+    place(this.handles.bl, fbLeft, fbBottom, 6, 6);
+    place(this.handles.br, fbRight, fbBottom, 6, 6);
+    const midX = (fbLeft + fbRight) / 2;
+    const midY = (fbTop + fbBottom) / 2;
+    place(this.handles.t, midX, fbTop, 9, 3);
+    place(this.handles.r, fbRight, midY, 3, 9);
+    place(this.handles.b, midX, fbBottom, 9, 3);
+    place(this.handles.l, fbLeft, midY, 3, 9);
   }
 
   // ---- helpers ---------------------------------------------------------
@@ -529,9 +595,12 @@ export class KeyframeOverlay {
     };
   }
 
-  private makeHandle(name: "tl" | "tr" | "bl" | "br"): HTMLDivElement {
+  private makeHandle(name: HandleKind): HTMLDivElement {
     const el = document.createElement("div");
-    el.className = `aicut-keyframe-overlay__handle aicut-keyframe-overlay__handle--${name}`;
+    const isEdge = name.length === 1;
+    el.className =
+      `aicut-keyframe-overlay__handle aicut-keyframe-overlay__handle--${name}` +
+      (isEdge ? " aicut-keyframe-overlay__handle--edge" : "");
     el.setAttribute("data-testid", `aicut-keyframe-handle-${name}`);
     el.addEventListener("pointerdown", (e) => this.onScaleStart(name, e));
     this.root.appendChild(el);
