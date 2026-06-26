@@ -466,8 +466,9 @@ cd backends/go && go run .         # http://127.0.0.1:8788
 pnpm typecheck                     # whole workspace, strict TS
 pnpm test                          # Vitest unit tests (packages/core)
 pnpm test:e2e                      # Playwright against the live demo
-pnpm --filter @aicut/e2e exec playwright test screenshots.spec.ts
-                                   # regenerate docs/screenshots/*.png
+pnpm screenshots                   # regenerate docs/screenshots/*.png
+                                   # (drop any short clip at examples/
+                                   # react-demo/public/sample.mp4 first)
 ```
 
 ### Release

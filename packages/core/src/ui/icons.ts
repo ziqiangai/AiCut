@@ -71,6 +71,13 @@ export const ICONS = {
   keyframeFilled: wrap(
     `<g transform="translate(8 8) rotate(45) translate(-4 -4)" fill="currentColor"><rect x="0" y="0" width="8" height="8" rx="0.8"/></g>`,
   ),
+  /** Aspect-ratio picker — outlined rounded rectangle (landscape
+   *  proportions) with a portrait rectangle nested inside it. Matches
+   *  CapCut's "比例" affordance: a frame-within-frame conveying
+   *  "choose which output canvas to crop into". */
+  aspect: wrap(
+    `<g transform="translate(1 1.5)" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="0.6" y="2.4" width="12.8" height="8.2" rx="1.2"/><rect x="4.6" y="4.4" width="4.8" height="6.2" rx="0.9" stroke-width="1.1" opacity="0.85"/></g>`,
+  ),
   /** Counter-clockwise circular arrow — "reset to initial layout". */
   reset:
     `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`,

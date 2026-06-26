@@ -1,4 +1,6 @@
 import type { Locale } from "../i18n.js";
+import type { AspectRatio } from "../types.js";
+import { AspectPicker } from "./aspect-picker.js";
 import { fmtClock } from "./format.js";
 import { ICONS, type IconName } from "./icons.js";
 
@@ -25,6 +27,9 @@ export interface ToolbarCallbacks {
    *  keyframe-add finds the clip — see Editor.seekToSelectedClipEdge. */
   onSeekClipStart: () => void;
   onSeekClipEnd: () => void;
+  /** User picked an output aspect from the built-in picker. `null`
+   *  means "Original" (clear Project.aspect). */
+  onAspectChange: (aspect: AspectRatio | null) => void;
 }
 
 interface ToolbarState {
@@ -55,6 +60,12 @@ interface ToolbarState {
    *  toggle pattern: when off the |◀ / ▶| buttons are completely
    *  hidden (display: none) so they don't take up toolbar real estate. */
   clipEdgeNavEnabled: boolean;
+  /** Host opt-in for the built-in aspect picker. When off, the chip
+   *  is completely hidden so today's chrome layout is unchanged for
+   *  hosts who roll their own picker via `toolbarLeft`. */
+  aspectEnabled: boolean;
+  /** Current output aspect — null = "Original" (no Project.aspect). */
+  aspect: AspectRatio | null;
 }
 
 /**
@@ -84,6 +95,7 @@ export class Toolbar {
   readonly extrasLeft: HTMLDivElement;
   readonly extrasRight: HTMLDivElement;
 
+  private aspectPicker!: AspectPicker;
   private undoBtn!: HTMLButtonElement;
   private redoBtn!: HTMLButtonElement;
   private splitBtn!: HTMLButtonElement;
@@ -115,6 +127,15 @@ export class Toolbar {
     this.extrasRight = mkGroup("aicut-toolbar-extras aicut-toolbar-extras-right");
 
     const left = mkGroup("aicut-toolbar-left");
+    // Built-in aspect picker. Hidden until render() flips
+    // aspectEnabled on, to keep today's chrome unchanged for hosts
+    // who don't opt in.
+    this.aspectPicker = new AspectPicker(
+      { onChange: (a) => cb.onAspectChange(a) },
+      locale,
+    );
+    this.aspectPicker.element.style.display = "none";
+    left.appendChild(this.aspectPicker.element);
     this.undoBtn = mkIconButton("undo", locale.undo, () => cb.onUndo(), "aicut-undo");
     this.redoBtn = mkIconButton("redo", locale.redo, () => cb.onRedo(), "aicut-redo");
     this.splitBtn = mkIconButton("split", locale.split, () => cb.onSplit(), "aicut-split");
@@ -256,6 +277,17 @@ export class Toolbar {
         ? this.locale.snapOnTitle
         : this.locale.snapOffTitle;
     }
+    if (
+      !this.lastState ||
+      this.lastState.aspectEnabled !== state.aspectEnabled
+    ) {
+      this.aspectPicker.element.style.display = state.aspectEnabled
+        ? ""
+        : "none";
+    }
+    if (!this.lastState || this.lastState.aspect !== state.aspect) {
+      this.aspectPicker.setValue(state.aspect);
+    }
     // Keyframe button — toggle visibility via display, swap icon to
     // reflect whether a kf exists at the playhead, swap tooltip.
     if (
@@ -302,6 +334,7 @@ export class Toolbar {
   }
 
   destroy(): void {
+    this.aspectPicker.destroy();
     this.root.remove();
   }
 
@@ -313,6 +346,7 @@ export class Toolbar {
    */
   setLocale(locale: Locale): void {
     this.locale = locale;
+    this.aspectPicker.setLocale(locale);
     const applyTitle = (
       el: HTMLElement | undefined,
       title: string,

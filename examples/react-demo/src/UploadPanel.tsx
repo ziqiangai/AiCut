@@ -62,11 +62,11 @@ export function UploadPanel({ uploadEndpoint, onUploaded }: Props) {
             body: form,
           });
           if (!res.ok) {
-            throw new Error(`上传失败 HTTP ${res.status}`);
+            throw new Error(`Upload failed: HTTP ${res.status}`);
           }
           const data = (await res.json()) as { url?: string };
           if (!data.url) {
-            throw new Error("上传响应缺少 url 字段");
+            throw new Error("Upload response missing `url` field");
           }
           url = data.url;
           isLocal = false;
@@ -74,18 +74,18 @@ export function UploadPanel({ uploadEndpoint, onUploaded }: Props) {
           url = URL.createObjectURL(file);
           isLocal = true;
           toast.push(
-            "未配置 VITE_UPLOAD_ENDPOINT — 使用本地 blob URL，仅浏览器内可用，无法导出。",
+            "VITE_UPLOAD_ENDPOINT not set — using a local blob URL. Playable in this browser only, can't be exported.",
             { variant: "warn", duration: 5000 },
           );
         }
         const durationMs = await probeDuration(url).catch(() => undefined);
         onUploaded({ url, name: file.name, durationMs, isLocal });
         if (!isLocal) {
-          toast.push(`已上传：${file.name}`, { variant: "success" });
+          toast.push(`Uploaded: ${file.name}`, { variant: "success" });
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        toast.push(`上传出错：${msg}`, { variant: "error" });
+        toast.push(`Upload error: ${msg}`, { variant: "error" });
       } finally {
         setBusy(false);
       }
@@ -114,17 +114,17 @@ export function UploadPanel({ uploadEndpoint, onUploaded }: Props) {
         style={{
           ...zoneStyle,
           borderColor: dragOver
-            ? "var(--color-brand, #ff3386)"
+            ? "var(--color-brand, #9a31f4)"
             : "rgba(255, 255, 255, 0.18)",
           background: dragOver
-            ? "rgba(255, 51, 134, 0.06)"
+            ? "rgba(154, 49, 244, 0.06)"
             : "transparent",
           opacity: busy ? 0.6 : 1,
           cursor: busy ? "wait" : "pointer",
         }}
       >
         <div style={{ fontWeight: 600, fontSize: 13 }}>
-          {busy ? "上传中…" : "点击或拖拽视频文件"}
+          {busy ? "Uploading…" : "Click or drag a video file"}
         </div>
         <div
           style={{
@@ -135,8 +135,8 @@ export function UploadPanel({ uploadEndpoint, onUploaded }: Props) {
           }}
         >
           {uploadEndpoint
-            ? `已配置上传地址 → 视频会 POST 到后端`
-            : `未配置 VITE_UPLOAD_ENDPOINT → 仅本地 blob 预览`}
+            ? `Upload endpoint set → POSTs to the backend`
+            : `VITE_UPLOAD_ENDPOINT unset → local blob preview only`}
         </div>
       </div>
       <input

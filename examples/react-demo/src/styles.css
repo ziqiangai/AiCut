@@ -482,8 +482,8 @@ body,
 }
 
 .ldemo-smart-upload:hover {
-  border-color: var(--color-brand, #ff3386);
-  color: var(--color-brand, #ff3386);
+  border-color: var(--color-brand, #9a31f4);
+  color: var(--color-brand, #9a31f4);
 }
 
 .ldemo-smart-preset-title {
@@ -514,7 +514,7 @@ body,
 }
 
 .ldemo-smart-preset:hover {
-  border-color: var(--color-brand, #ff3386);
+  border-color: var(--color-brand, #9a31f4);
 }
 
 .ldemo-smart-preset-swatch {
@@ -537,7 +537,7 @@ body,
   padding: 0 16px;
   border-radius: 8px;
   border: 0;
-  background: var(--color-brand, #ff3386);
+  background: var(--color-brand, #9a31f4);
   color: #fff;
   font: inherit;
   font-size: 13px;
@@ -547,7 +547,7 @@ body,
 }
 
 .ldemo-generate:hover {
-  background: color-mix(in srgb, var(--color-brand, #ff3386) 88%, black);
+  background: color-mix(in srgb, var(--color-brand, #9a31f4) 88%, black);
 }
 
 @keyframes aicut-pulse {

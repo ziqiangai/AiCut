@@ -83,12 +83,24 @@ const SRC_B = {
 };
 
 function seed(): Project {
-  // No preset sources — users upload their own from the sidebar.
   // Two empty video tracks so multi-track layout is visible from
   // first paint; uploads land on the first empty one by default.
+  // Preload via env var is local-dev convenience — when set, the
+  // source lands here and the `ready`-event handler in onReady
+  // creates the clip as soon as metadata resolves.
+  const sources = PRELOAD_VIDEO_URL
+    ? [
+        {
+          id: createId("src"),
+          url: PRELOAD_VIDEO_URL,
+          kind: "video" as const,
+          name: PRELOAD_VIDEO_NAME,
+        },
+      ]
+    : [];
   return {
     version: 1,
-    sources: [],
+    sources,
     tracks: [
       { id: createId("track"), kind: "video", clips: [] },
       { id: createId("track"), kind: "video", clips: [] },
@@ -252,7 +264,7 @@ function ExportPopover(props: {
         gap: 10,
       }}
     >
-      <div style={{ fontWeight: 600, fontSize: 13 }}>导出设置</div>
+      <div style={{ fontWeight: 600, fontSize: 13 }}>Export settings</div>
       <Row label="比例">
         <PopoverSelect
           testId="demo-export-aspect"
@@ -307,7 +319,7 @@ function ExportPopover(props: {
           onClick={props.onConfirm}
           style={{
             ...demoSlotBtnStyle,
-            background: "var(--color-brand, #ff3386)",
+            background: "var(--color-brand, #9a31f4)",
             color: "#fff",
             fontWeight: 600,
           }}
@@ -396,7 +408,7 @@ function PopoverSelect<T extends string | number>(props: {
           border:
             "1px solid " +
             (open
-              ? "var(--color-brand, #ff3386)"
+              ? "var(--color-brand, #9a31f4)"
               : "var(--aicut-controls-border, rgba(255,255,255,0.16))"),
           borderRadius: 6,
           color: "inherit",
@@ -404,7 +416,7 @@ function PopoverSelect<T extends string | number>(props: {
           fontSize: 12,
           cursor: "pointer",
           position: "relative",
-          boxShadow: open ? "0 0 0 2px rgba(255,51,134,0.22)" : undefined,
+          boxShadow: open ? "0 0 0 2px rgba(154, 49, 244,0.22)" : undefined,
           transition: "border-color 120ms ease-out, box-shadow 120ms ease-out",
         }}
       >
@@ -433,7 +445,7 @@ function PopoverSelect<T extends string | number>(props: {
             opacity: 0.75,
             transform: open ? "rotate(180deg)" : "none",
             transformOrigin: "50% 35%",
-            color: open ? "var(--color-brand, #ff3386)" : "currentColor",
+            color: open ? "var(--color-brand, #9a31f4)" : "currentColor",
             transition: "transform 120ms ease-out",
           }}
         />
@@ -476,7 +488,7 @@ function PopoverSelect<T extends string | number>(props: {
                   borderRadius: 4,
                   cursor: "pointer",
                   color: selected
-                    ? "var(--color-brand, #ff3386)"
+                    ? "var(--color-brand, #9a31f4)"
                     : "inherit",
                   background: "transparent",
                 }}
@@ -553,6 +565,20 @@ const demoSlotSelectStyle: CSSProperties = {
   boxSizing: "border-box",
 };
 
+const demoSlotInputStyle: CSSProperties = {
+  height: 28,
+  padding: "0 8px",
+  borderRadius: 8,
+  border: "1px solid var(--aicut-controls-border)",
+  background: "var(--aicut-controls-hover)",
+  color: "inherit",
+  fontFamily: "inherit",
+  fontSize: 12,
+  lineHeight: 1,
+  width: 60,
+  boxSizing: "border-box",
+};
+
 interface ExportStatus {
   running: boolean;
   phase?: "encode" | "concat" | "done" | "error";
@@ -594,9 +620,9 @@ function ExportStatusPill({ status }: { status: ExportStatus }) {
           fontSize: 11,
           lineHeight: 1,
           fontVariantNumeric: "tabular-nums",
-          color: "var(--color-brand, #ff3386)",
-          background: "rgba(255,51,134,0.10)",
-          border: "1px solid rgba(255,51,134,0.32)",
+          color: "var(--color-brand, #9a31f4)",
+          background: "rgba(154, 49, 244,0.10)",
+          border: "1px solid rgba(154, 49, 244,0.32)",
         }}
       >
         <span
@@ -606,7 +632,7 @@ function ExportStatusPill({ status }: { status: ExportStatus }) {
             width: 6,
             height: 6,
             borderRadius: 3,
-            background: "var(--color-brand, #ff3386)",
+            background: "var(--color-brand, #9a31f4)",
             animation: "aicut-pulse 1.2s ease-in-out infinite",
           }}
         />
@@ -635,7 +661,7 @@ function ExportStatusPill({ status }: { status: ExportStatus }) {
           whiteSpace: "nowrap",
         }}
       >
-        导出失败 — {status.error}
+        Export failed — {status.error}
       </span>
     );
   }
@@ -668,6 +694,19 @@ const BACKENDS = {
 const UPLOAD_ENDPOINT =
   (import.meta.env.VITE_UPLOAD_ENDPOINT as string | undefined) || null;
 
+/**
+ * Local-dev convenience: if a video URL is set in the env, the demo
+ * auto-seeds it as a clip on first mount so reloading the page
+ * doesn't require dragging the file in again. CI / Pages builds
+ * leave this unset and start empty.
+ */
+const PRELOAD_VIDEO_URL =
+  (import.meta.env.VITE_PRELOAD_VIDEO_URL as string | undefined) || null;
+const PRELOAD_VIDEO_NAME =
+  (import.meta.env.VITE_PRELOAD_VIDEO_NAME as string | undefined) ||
+  PRELOAD_VIDEO_URL?.split("/").pop() ||
+  "sample.mp4";
+
 export function App() {
   const apiRef = useRef<VideoEditorApi | null>(null);
   const toast = useToast();
@@ -676,7 +715,6 @@ export function App() {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
   const [themeName, setThemeName] = useState<"dark" | "light">("dark");
-  const [aspect, setAspect] = useState<"16:9" | "9:16" | "1:1">("16:9");
   // Export popover state. The user opens it via the "导出" button,
   // picks aspect / resolution / fps, then Confirm posts. Mirrors how
   // real NLEs gate export behind a settings dialog so accidental
@@ -721,6 +759,10 @@ export function App() {
   const [exportResIdx, setExportResIdx] = useState(2);
   const [exportFps, setExportFps] = useState(30);
   const [showToolbarLeft, setShowToolbarLeft] = useState(true);
+  // Free-form text shown inside the `toolbarLeft` slot — proves the
+  // slot still accepts any host content even though aspect is now
+  // built into the editor. Demo only; not persisted.
+  const [projectName, setProjectName] = useState("Untitled cut");
   const [showToolbarRight, setShowToolbarRight] = useState(true);
   const [showHeader, setShowHeader] = useState(true);
   const [backendKind, setBackendKind] = useState<"ts" | "go">("ts");
@@ -786,7 +828,7 @@ export function App() {
     const baseUrl = BACKENDS[backendKindRef.current].url;
     if (!baseUrl) {
       toast.push(
-        `导出失败：未配置 ${backendKindRef.current.toUpperCase()} 后端地址。请在 .env.local 中设置 VITE_BACKEND_${backendKindRef.current.toUpperCase()}_URL 后重新构建。`,
+        `Export failed: ${backendKindRef.current.toUpperCase()} backend URL is not configured. Set VITE_BACKEND_${backendKindRef.current.toUpperCase()}_URL in .env.local and rebuild.`,
         { variant: "warn", duration: 6000 },
       );
       setExportStatus({ running: false });
@@ -796,7 +838,7 @@ export function App() {
     // them. If any source URL is a blob:, warn the user up front.
     if (project.sources.some((s) => s.url.startsWith("blob:"))) {
       toast.push(
-        "导出可能失败：部分视频源是浏览器本地 blob URL，后端无法访问。请配置 VITE_UPLOAD_ENDPOINT 上传到可访问的位置后重新拖入。",
+        "Export may fail: some video sources are browser-local blob URLs that the backend can't reach. Set VITE_UPLOAD_ENDPOINT so uploads land at a fetchable URL, then re-upload.",
         { variant: "warn", duration: 6000 },
       );
     }
@@ -907,14 +949,14 @@ export function App() {
   const handleUploaded = (r: UploadResult): void => {
     const api = apiRef.current;
     if (!api) {
-      toast.push("编辑器未就绪，请稍后再试", { variant: "warn" });
+      toast.push("Editor isn't ready yet — try again in a moment.", { variant: "warn" });
       return;
     }
     const project = api.getProject();
     const sourceId = createId("src");
     const trackIdx = project.tracks.findIndex((t) => t.kind === "video");
     if (trackIdx < 0) {
-      toast.push("没有可用的视频轨道", { variant: "warn" });
+      toast.push("No video track available.", { variant: "warn" });
       return;
     }
     const track = project.tracks[trackIdx]!;
@@ -981,6 +1023,19 @@ export function App() {
           timelineHeight={timelineHeight}
           keyframes={{ enabled: keyframesEnabled }}
           clipEdgeNav={{ enabled: clipEdgeNavEnabled }}
+          aspect={{ enabled: true }}
+          onAspectChange={(a) => {
+            // Built-in picker drives the demo's export aspect default
+            // — pickers in real hosts wire to whatever output settings
+            // they own (preview letterbox, ffmpeg dims, etc.).
+            if (a == null) return; // "Original" keeps the current export aspect
+            if (a === "16:9" || a === "9:16" || a === "1:1" || a === "4:3") {
+              setExportAspect(a);
+              setExportResIdx((i) =>
+                Math.min(i, RESOLUTIONS[a].length - 1),
+              );
+            }
+          }}
           style={{ height: "100%" }}
           headerLeft={
             showHeader ? (
@@ -1013,14 +1068,14 @@ export function App() {
                       ...demoSlotBtnStyle,
                       background: exportStatus.running
                         ? "var(--aicut-controls-hover, rgba(255,255,255,0.08))"
-                        : "var(--color-brand, #ff3386)",
+                        : "var(--color-brand, #9a31f4)",
                       color: exportStatus.running
                         ? "var(--aicut-controls-text, rgba(255,255,255,0.6))"
                         : "#fff",
                       cursor: exportStatus.running ? "not-allowed" : "pointer",
                     }}
                   >
-                    {exportStatus.running ? "导出中…" : "Export"}
+                    {exportStatus.running ? "Exporting…" : "Export"}
                   </button>
                   {exportPopoverOpen && !exportStatus.running ? (
                     <ExportPopover
@@ -1063,21 +1118,24 @@ export function App() {
           }
           toolbarLeft={
             showToolbarLeft ? (
+              // Aspect ratio is now built into the editor (see
+              // `aspect={{ enabled: true }}` above) — this slot still
+              // accepts whatever the host wants. Here it's a quick
+              // project-name editor to prove the slot mechanism is
+              // unchanged.
               <label
                 style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}
               >
-                <span style={{ opacity: 0.7 }}>Aspect</span>
-                <select
-                  data-testid="demo-aspect"
-                  className="demo-slot-select"
-                  value={aspect}
-                  onChange={(e) => setAspect(e.target.value as typeof aspect)}
-                  style={demoSlotSelectStyle}
-                >
-                  <option value="16:9">16:9</option>
-                  <option value="9:16">9:16</option>
-                  <option value="1:1">1:1</option>
-                </select>
+                <span style={{ opacity: 0.7 }}>Project</span>
+                <input
+                  type="text"
+                  data-testid="demo-project-name"
+                  className="demo-slot-input"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  style={demoSlotInputStyle}
+                  spellCheck={false}
+                />
               </label>
             ) : null
           }
@@ -1157,7 +1215,7 @@ export function App() {
             data-testid="demo-theme-toggle"
             onClick={() => setThemeName(themeName === "dark" ? "light" : "dark")}
           >
-            {themeName === "dark" ? "切换到 Light Studio" : "切换到 Pro Dark"}
+            {themeName === "dark" ? "Switch to Light Studio" : "Switch to Pro Dark"}
           </button>
         </div>
 
@@ -1318,7 +1376,7 @@ export function App() {
               checked={showToolbarLeft}
               onChange={(e) => setShowToolbarLeft(e.target.checked)}
             />
-            <span>Left (Aspect)</span>
+            <span>Left (Project name)</span>
           </label>
           <label>
             <input
@@ -1463,7 +1521,7 @@ export function App() {
           ) : null}
           {!exportStatus.running && !exportStatus.fileUrl && !exportStatus.error ? (
             <div style={{ opacity: 0.6 }}>
-              点工具栏的"导出"按钮触发；后端要先单独启动。
+              Click the Export button in the toolbar to start — the backend must be running.
             </div>
           ) : null}
         </div>

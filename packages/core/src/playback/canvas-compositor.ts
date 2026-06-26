@@ -380,9 +380,20 @@ export class CanvasCompositorEngine implements PlaybackEngine {
     if (v && v.videoWidth > 0 && v.videoHeight > 0 && clip) {
       const vw = v.videoWidth;
       const vh = v.videoHeight;
-      const baseScale = Math.min(cw / vw, ch / vh);
-      const dw = vw * baseScale;
-      const dh = vh * baseScale;
+      // Canvas size = Project.aspect when the user picked one;
+      // intrinsic video aspect otherwise.
+      const projAspect = parseAspect(this.project.aspect);
+      const [aw, ah] = projAspect ?? [vw, vh];
+      const canvasScale = Math.min(cw / aw, ch / ah);
+      const dw = aw * canvasScale; // output canvas dims (canvas px)
+      const dh = ah * canvasScale;
+      // Video letterboxes inside the canvas — contain math so a
+      // mismatched-aspect video sits centered with backdrop on either
+      // side. When canvas == video aspect (Original / matching pick)
+      // vidW/vidH collapse to dw/dh and behaviour matches before.
+      const vidContain = Math.min(dw / vw, dh / vh);
+      const vidW = vw * vidContain;
+      const vidH = vh * vidContain;
       const cx = cw / 2;
       const cy = ch / 2;
       // Compose keyframe transform on top of the centered letterbox.
@@ -403,7 +414,7 @@ export class CanvasCompositorEngine implements PlaybackEngine {
       this.ctx.clip();
       this.ctx.translate(cx + t.panX * dpr, cy + t.panY * dpr);
       this.ctx.scale(t.scale, t.scale);
-      this.ctx.drawImage(v, -dw / 2, -dh / 2, dw, dh);
+      this.ctx.drawImage(v, -vidW / 2, -vidH / 2, vidW, vidH);
       this.ctx.restore();
       this.paintedFrames += 1;
       this.lastOutputRect = {
@@ -414,8 +425,11 @@ export class CanvasCompositorEngine implements PlaybackEngine {
       };
       const cssCx = cw / (2 * dpr) + t.panX;
       const cssCy = ch / (2 * dpr) + t.panY;
-      const cssW = (dw * t.scale) / dpr;
-      const cssH = (dh * t.scale) / dpr;
+      // Content rect tracks the VIDEO pixels (vidW/vidH), not the
+      // canvas — that's what the overlay's corner-scale handles
+      // attach to. The canvas itself is fixed (`lastOutputRect`).
+      const cssW = (vidW * t.scale) / dpr;
+      const cssH = (vidH * t.scale) / dpr;
       this.lastFrameRect = {
         x: cssCx - cssW / 2,
         y: cssCy - cssH / 2,
@@ -450,3 +464,20 @@ export class CanvasCompositorEngine implements PlaybackEngine {
 /** Factory shorthand for `Editor.create({ playbackEngine })`. */
 export const canvasCompositorEngineFactory: PlaybackEngineFactory = (opts) =>
   new CanvasCompositorEngine(opts);
+
+/**
+ * Parse a `Project.aspect` string like "16:9" into a `[w, h]` tuple.
+ * Returns null for missing / malformed input so callers can fall
+ * back to the source video's intrinsic aspect.
+ */
+function parseAspect(value: string | undefined | null): [number, number] | null {
+  if (!value) return null;
+  const m = value.match(/^\s*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\s*$/);
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    return null;
+  }
+  return [w, h];
+}

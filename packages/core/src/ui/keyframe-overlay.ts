@@ -317,14 +317,22 @@ export class KeyframeOverlay {
   }
 
   private layout(): void {
-    const enabled = this.editor.isKeyframesEnabled();
-    if (!enabled) {
+    const frameVisible = this.editor.isPreviewFrameEnabled();
+    const interactive = this.editor.isKeyframesEnabled();
+    if (!frameVisible && !interactive) {
       this.root.style.display = "none";
       return;
     }
     // Output rect = the FIXED stage where the video gets clipped.
     // The brand-colored border + body drag-target are anchored here.
-    const outRect = this.editor.getActiveOutputFrameRect();
+    // Without a loaded clip the engine has nothing to report; fall
+    // back to an aspect-fit rect inside the preview host so the user
+    // sees "this is where the video will land" before uploading
+    // anything. Driven by `Project.aspect` so switching ratios in
+    // the built-in picker is visible even in the empty state.
+    const outRect =
+      this.editor.getActiveOutputFrameRect() ??
+      (frameVisible ? this.computeEmptyStateRect() : null);
     // Content rect = where the video pixels currently land (after
     // transform). Scale handles attach to its corners so they visually
     // grow / shrink WITH the video.
@@ -334,6 +342,14 @@ export class KeyframeOverlay {
       return;
     }
     this.root.style.display = "block";
+    // Interactive bits (frame-body drag-to-pan + corner scale handles)
+    // light up only with keyframes mode. Without it the frame is a
+    // pure outline — pointer events pass straight through.
+    this.root.classList.toggle(
+      "aicut-keyframe-overlay--interactive",
+      interactive,
+    );
+    this.frameBody.style.display = frameVisible ? "block" : "none";
     Object.assign(this.frameBody.style, {
       left: `${outRect.x}px`,
       top: `${outRect.y}px`,
@@ -378,6 +394,42 @@ export class KeyframeOverlay {
   }
 
   // ---- helpers ---------------------------------------------------------
+
+  /**
+   * Fallback rect used in the "no clip loaded yet" empty state — so
+   * the dashed outline visualises the chosen aspect ratio even before
+   * the user uploads anything. Aspect-fit math inside the preview
+   * host with a 16px breathing margin; defaults to 16:9 when no
+   * `Project.aspect` is set.
+   */
+  private computeEmptyStateRect(): { x: number; y: number; w: number; h: number } | null {
+    const aspect = this.editor.getAspect();
+    const [aw, ah] = parseAspect(aspect) ?? [16, 9];
+    const containerW = this.host.clientWidth;
+    const containerH = this.host.clientHeight;
+    if (containerW <= 0 || containerH <= 0) return null;
+    const margin = 16;
+    const innerW = Math.max(0, containerW - margin * 2);
+    const innerH = Math.max(0, containerH - margin * 2);
+    if (innerW <= 0 || innerH <= 0) return null;
+    const targetAr = aw / ah;
+    const containerAr = innerW / innerH;
+    let w: number;
+    let h: number;
+    if (containerAr > targetAr) {
+      h = innerH;
+      w = h * targetAr;
+    } else {
+      w = innerW;
+      h = w / targetAr;
+    }
+    return {
+      x: (containerW - w) / 2,
+      y: (containerH - h) / 2,
+      w,
+      h,
+    };
+  }
 
   private makeHandle(name: "tl" | "tr" | "bl" | "br"): HTMLDivElement {
     const el = document.createElement("div");
@@ -436,4 +488,20 @@ function nearestSnap(
     }
   }
   return best;
+}
+
+/**
+ * Parse an aspect-ratio string like "16:9" into a [w, h] tuple.
+ * Returns null for malformed input so callers can apply a default.
+ */
+function parseAspect(value: string | null): [number, number] | null {
+  if (!value) return null;
+  const m = value.match(/^\s*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\s*$/);
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    return null;
+  }
+  return [w, h];
 }

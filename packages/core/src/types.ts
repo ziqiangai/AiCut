@@ -111,7 +111,33 @@ export interface Project {
    * this in, so a missing field stays missing through round-trips.
    */
   fps?: number;
+  /**
+   * Output aspect ratio. Drives the editor's built-in aspect picker
+   * (when enabled via `EditorOptions.aspect.enabled`) and is exposed
+   * to hosts via the `aspectChange` event so they can wire it into
+   * their own export defaults / preview letterboxing. Optional for
+   * back-compat — projects without an aspect are treated as "source"
+   * (the host decides; usually means follow the first clip's
+   * intrinsic aspect). `normalizeProject` does NOT fill this in.
+   */
+  aspect?: AspectRatio;
 }
+
+/**
+ * Common output aspect ratios — the menu the user picks from when
+ * the built-in aspect picker is enabled. Mirrors the CapCut roster:
+ * landscape, portrait, square, classic 4:3, classic portrait 3:4,
+ * IG portrait 4:5, and cinematic 21:9. New values are an additive
+ * change, so future ratios can be appended without breaking projects.
+ */
+export type AspectRatio =
+  | "16:9"
+  | "9:16"
+  | "1:1"
+  | "4:3"
+  | "3:4"
+  | "4:5"
+  | "21:9";
 
 /**
  * Subset of CSS variables the editor honors. Pass any custom values
