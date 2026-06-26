@@ -192,7 +192,28 @@ export class ThumbnailRibbon {
           cnv.height = THUMB_HEIGHT;
           const cx = cnv.getContext("2d");
           if (!cx) return reject(new Error("no 2d ctx"));
-          cx.drawImage(video, 0, 0, THUMB_WIDTH, THUMB_HEIGHT);
+          // Cover-crop the source into the fixed 16:9 thumb box so a
+          // portrait / square video doesn't get squished into a strip.
+          // Mirrors CapCut / Premiere timeline thumbnails (centered
+          // crop of the active frame). Source-rect math, dest fills.
+          const vw = video.videoWidth || THUMB_WIDTH;
+          const vh = video.videoHeight || THUMB_HEIGHT;
+          const targetAr = THUMB_WIDTH / THUMB_HEIGHT;
+          const srcAr = vw / vh;
+          let sx = 0;
+          let sy = 0;
+          let sw = vw;
+          let sh = vh;
+          if (srcAr > targetAr) {
+            // Source wider than thumb — crop the sides.
+            sw = vh * targetAr;
+            sx = (vw - sw) / 2;
+          } else if (srcAr < targetAr) {
+            // Source taller than thumb — crop top + bottom.
+            sh = vw / targetAr;
+            sy = (vh - sh) / 2;
+          }
+          cx.drawImage(video, sx, sy, sw, sh, 0, 0, THUMB_WIDTH, THUMB_HEIGHT);
           // createImageBitmap is async but cheap and gives a portable
           // GPU-friendly handle the strip canvas can blit fast.
           createImageBitmap(cnv).then(resolve, reject);

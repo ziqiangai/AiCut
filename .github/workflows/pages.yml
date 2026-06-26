@@ -57,6 +57,10 @@ jobs:
           VITE_BACKEND_TS_URL: ${{ secrets.VITE_BACKEND_TS_URL }}
           VITE_BACKEND_GO_URL: ${{ secrets.VITE_BACKEND_GO_URL }}
           VITE_UPLOAD_ENDPOINT: ${{ secrets.VITE_UPLOAD_ENDPOINT }}
+          # Hide the lighting showcase in the public Pages build —
+          # only the video editor is shown. Local dev (`pnpm dev`)
+          # still has access to all routes.
+          VITE_HIDE_LIGHTING: "1"
         run: pnpm --filter "@aicut/react-demo" build
 
       - name: Add SPA fallback for hash router

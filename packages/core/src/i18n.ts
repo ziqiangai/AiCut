@@ -35,6 +35,14 @@ export interface Locale {
   /** Toolbar tooltip — jump the playhead to the selected clip's end. */
   seekClipEnd: string;
 
+  // Aspect-ratio picker (built-in, opt-in via aspect.enabled)
+  /** Toolbar button tooltip — opens the aspect picker popover. */
+  aspectTitle: string;
+  /** Header inside the popover — sits above the ratio grid. */
+  aspectMenuLabel: string;
+  /** Label for the "follow source clip" item — clears `Project.aspect`. */
+  aspectOriginal: string;
+
   // Keyframe panel chrome
   /** Header text on the keyframe parameter panel. */
   keyframePanelTitle: string;
@@ -96,6 +104,9 @@ export const localeEn: Locale = {
   keyframeRemove: "Remove keyframe at playhead",
   seekClipStart: "Jump to clip start (I)",
   seekClipEnd: "Jump to clip end (O)",
+  aspectTitle: "Aspect ratio",
+  aspectMenuLabel: "Aspect ratio",
+  aspectOriginal: "Original",
   keyframePanelTitle: "Keyframe",
   keyframePanelLabelX: "X",
   keyframePanelLabelY: "Y",
@@ -138,6 +149,9 @@ export const localeZh: Locale = {
   keyframeRemove: "删除当前关键帧",
   seekClipStart: "跳到片段起点 (I)",
   seekClipEnd: "跳到片段末尾 (O)",
+  aspectTitle: "比例",
+  aspectMenuLabel: "画面比例",
+  aspectOriginal: "原始",
   keyframePanelTitle: "关键帧",
   keyframePanelLabelX: "X 位移",
   keyframePanelLabelY: "Y 位移",

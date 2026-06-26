@@ -25,22 +25,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const SCREENSHOTS_DIR = path.resolve(__dirname, "../../docs/screenshots");
 
+// Media served straight from the dev server's `public/` dir (same
+// origin as the demo) — no separate media server to spin up. Drop a
+// real file at `examples/react-demo/public/sample.mp4` before running
+// these specs.
 const SEED_PROJECT = {
   version: 1,
   sources: [
     {
       id: "src-a",
-      url: "http://127.0.0.1:8091/a.mov",
+      url: "/sample.mp4",
       kind: "video" as const,
-      name: "a.mov",
-      duration: 12_000,
-    },
-    {
-      id: "src-b",
-      url: "http://127.0.0.1:8091/b.mov",
-      kind: "video" as const,
-      name: "b.mov",
-      duration: 12_000,
+      name: "sample.mp4",
+      duration: 5_000,
     },
   ],
   tracks: [
@@ -48,15 +45,15 @@ const SEED_PROJECT = {
       id: "tr-1",
       kind: "video" as const,
       clips: [
-        { id: "cl-1", sourceId: "src-a", in: 0, out: 6_000, start: 0 },
-        { id: "cl-2", sourceId: "src-b", in: 1_500, out: 6_500, start: 6_000 },
+        { id: "cl-1", sourceId: "src-a", in: 0, out: 5_000, start: 0 },
+        { id: "cl-2", sourceId: "src-a", in: 0, out: 5_000, start: 5_000 },
       ],
     },
     {
       id: "tr-2",
       kind: "video" as const,
       clips: [
-        { id: "cl-3", sourceId: "src-b", in: 0, out: 4_000, start: 1_500 },
+        { id: "cl-3", sourceId: "src-a", in: 0, out: 4_000, start: 1_500 },
       ],
     },
   ],
@@ -136,7 +133,7 @@ test.describe("README screenshots", () => {
     await waitForApi(page);
     await seed(page);
     await isolateEditor(page);
-    await page.waitForSelector('[data-testid="demo-export"]');
+    await page.waitForSelector('[data-testid="demo-header-export"]');
     const toolbar = page.getByTestId("aicut-toolbar");
     const tb = await toolbar.boundingBox();
     if (!tb) throw new Error("toolbar not visible");

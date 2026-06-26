@@ -10,7 +10,15 @@ import { LightingV3Demo } from "./LightingV3Demo.js";
  *
  * No history.pushState games — hash routing has zero server-config
  * cost and survives Vite's static dev server without rewrites.
+ *
+ * `VITE_HIDE_LIGHTING=1` (set in CI for the public GitHub Pages build)
+ * suppresses the lighting tabs + routes — visitors only see the
+ * video editor. Local dev keeps everything visible by default.
  */
+const HIDE_LIGHTING =
+  Boolean(import.meta.env.VITE_HIDE_LIGHTING) &&
+  import.meta.env.VITE_HIDE_LIGHTING !== "0" &&
+  import.meta.env.VITE_HIDE_LIGHTING !== "false";
 function useHash(): string {
   const [hash, setHash] = useState<string>(
     () => window.location.hash || "#/",
@@ -35,22 +43,29 @@ const TABS: TabSpec[] = [
     label: "Video editor",
     isActive: (h) => h === "#/" || h === "" || (!h.startsWith("#/lighting")),
   },
-  {
-    href: "#/lighting",
-    label: "Lighting v2",
-    isActive: (h) => h === "#/lighting",
-  },
-  {
-    href: "#/lighting-v3",
-    label: "Lighting v3 ★",
-    isActive: (h) => h.startsWith("#/lighting-v3"),
-  },
+  ...(HIDE_LIGHTING
+    ? []
+    : ([
+        {
+          href: "#/lighting",
+          label: "Lighting v2",
+          isActive: (h: string) => h === "#/lighting",
+        },
+        {
+          href: "#/lighting-v3",
+          label: "Lighting v3 ★",
+          isActive: (h: string) => h.startsWith("#/lighting-v3"),
+        },
+      ] satisfies TabSpec[])),
 ];
 
 export function Router() {
   const hash = useHash();
-  const onLightingV3 = hash.startsWith("#/lighting-v3");
-  const onLightingV2 = hash === "#/lighting";
+  // When lighting is hidden in CI builds, accessing a `#/lighting*`
+  // URL falls through to the video editor instead of rendering a
+  // dead route. Local dev keeps both routes live.
+  const onLightingV3 = !HIDE_LIGHTING && hash.startsWith("#/lighting-v3");
+  const onLightingV2 = !HIDE_LIGHTING && hash === "#/lighting";
 
   return (
     <div className="demo-root">

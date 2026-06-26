@@ -717,12 +717,12 @@ export class Timeline {
       text: v("--aicut-controls-text", "rgba(255,255,255,0.85)"),
       textMuted: v("--color-muted", "#999999"),
       trackBg: "rgba(255,255,255,0.06)",
-      brand: v("--color-brand", "#ff3386"),
+      brand: v("--color-brand", "#9a31f4"),
       brandTo: v("--color-secondary", "#9a31f4"),
       info: v("--color-info", "#1077ff"),
       clipText: "#fff",
       selectedRing: v("--color-info", "#1077ff"),
-      playhead: v("--color-brand", "#ff3386"),
+      playhead: v("--color-brand", "#9a31f4"),
     };
   }
 

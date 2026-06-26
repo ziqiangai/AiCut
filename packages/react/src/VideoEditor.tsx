@@ -10,6 +10,7 @@ import {
 import { createPortal } from "react-dom";
 import {
   Editor,
+  type AspectRatio,
   type EditorApi,
   type Locale,
   type Ms,
@@ -117,6 +118,26 @@ export interface VideoEditorProps {
    * fall through to the page.
    */
   clipEdgeNav?: { enabled?: boolean };
+  /**
+   * Dashed outline of the output canvas on top of the preview.
+   * Defaults to `{ enabled: true }` — the frame is purely visual
+   * (visualises the current aspect ratio / output dimensions) and is
+   * useful even without keyframe editing. Set `{ enabled: false }`
+   * for a clean preview. Independent of `keyframes`: when keyframes
+   * mode is on, the frame body additionally becomes draggable (pan)
+   * and grows corner scale handles.
+   */
+  previewFrame?: { enabled?: boolean };
+  /**
+   * Built-in aspect-ratio picker (CapCut-style 比例 dropdown). Reactive
+   * — set `{ enabled: true }` to surface the chip at the left of the
+   * toolbar. Off keeps today's chrome unchanged. Pair with
+   * `onAspectChange` to drive the host's preview letterbox / export
+   * defaults; the library does not letterbox by itself.
+   */
+  aspect?: { enabled?: boolean };
+  /** Fires when the user picks an output aspect (or "Original" → null). */
+  onAspectChange?: (aspect: AspectRatio | null) => void;
 }
 
 /**
@@ -172,6 +193,12 @@ export function VideoEditor(props: VideoEditorProps) {
       ...(cbRef.current.clipEdgeNav != null
         ? { clipEdgeNav: cbRef.current.clipEdgeNav }
         : {}),
+      ...(cbRef.current.previewFrame != null
+        ? { previewFrame: cbRef.current.previewFrame }
+        : {}),
+      ...(cbRef.current.aspect != null
+        ? { aspect: cbRef.current.aspect }
+        : {}),
     });
     editorRef.current = editor;
     setSlots({
@@ -192,6 +219,9 @@ export function VideoEditor(props: VideoEditorProps) {
       ),
       editor.on("keyframeSelectionChange", ({ target }) =>
         cbRef.current.onKeyframeSelectionChange?.(target),
+      ),
+      editor.on("aspectChange", ({ aspect }) =>
+        cbRef.current.onAspectChange?.(aspect),
       ),
       editor.on("error", ({ error }) => cbRef.current.onError?.(error)),
     ];
@@ -239,6 +269,25 @@ export function VideoEditor(props: VideoEditorProps) {
       editor.setClipEdgeNavEnabled(desired);
     }
   }, [props.clipEdgeNav?.enabled]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    // Default true — only flip when host explicitly sets false.
+    const desired = props.previewFrame?.enabled !== false;
+    if (editor.isPreviewFrameEnabled() !== desired) {
+      editor.setPreviewFrameEnabled(desired);
+    }
+  }, [props.previewFrame?.enabled]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const desired = props.aspect?.enabled === true;
+    if (editor.isAspectEnabled() !== desired) {
+      editor.setAspectEnabled(desired);
+    }
+  }, [props.aspect?.enabled]);
 
   // Reactive — the underlying CSS custom property can be updated on
   // the container any time; the timeline picks up the new height

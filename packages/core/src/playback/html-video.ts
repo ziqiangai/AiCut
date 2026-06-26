@@ -163,7 +163,20 @@ export class HtmlVideoEngine implements PlaybackEngine {
     return { x: cx - w / 2, y: cy - h / 2, w, h };
   }
 
-  /** Untransformed contain-letterbox rect — the OUTPUT frame. */
+  /**
+   * Untransformed output-canvas rect.
+   *
+   * Source of truth: `Project.aspect` when the user picked a ratio
+   * via the built-in picker — the canvas mirrors that, and a video
+   * with a different intrinsic aspect letterboxes inside it
+   * (`object-fit: contain` on the inner <video>). When `Project.aspect`
+   * is null ("Original") the canvas falls back to the source video's
+   * intrinsic aspect (today's behaviour).
+   *
+   * Without this, picking "9:16" while editing a 16:9 video left the
+   * dashed frame and the painted video at mismatched aspects — the
+   * frame would silently jump back to 16:9 once the clip loaded.
+   */
   private baseFrameRect():
     | { x: number; y: number; w: number; h: number }
     | null {
@@ -178,9 +191,13 @@ export class HtmlVideoEngine implements PlaybackEngine {
     const cw = hostRect.width;
     const ch = hostRect.height;
     if (cw === 0 || ch === 0) return null;
-    const scale = Math.min(cw / v.videoWidth, ch / v.videoHeight);
-    const w = v.videoWidth * scale;
-    const h = v.videoHeight * scale;
+    // Resolve the target aspect: project.aspect overrides; otherwise
+    // the source video's intrinsic aspect.
+    const aspect = parseAspect(this.project.aspect);
+    const [aw, ah] = aspect ?? [v.videoWidth, v.videoHeight];
+    const scale = Math.min(cw / aw, ch / ah);
+    const w = aw * scale;
+    const h = ah * scale;
     return { x: (cw - w) / 2, y: (ch - h) / 2, w, h };
   }
 
@@ -282,7 +299,12 @@ export class HtmlVideoEngine implements PlaybackEngine {
         inset: "0",
         width: "100%",
         height: "100%",
-        objectFit: "fill",
+        // contain (not fill) so the video letterboxes inside the
+        // output canvas when the canvas aspect (driven by
+        // `Project.aspect`) differs from the video's intrinsic aspect.
+        // When they match (Original / matching ratio), contain
+        // produces the same pixel-perfect result as fill.
+        objectFit: "contain",
         // Transform origin at center so scale() scales around the
         // video's centroid, not its top-left corner.
         transformOrigin: "50% 50%",
@@ -436,3 +458,20 @@ export class HtmlVideoEngine implements PlaybackEngine {
 /** Factory shorthand for `Editor.create({ playbackEngine })`. */
 export const htmlVideoEngineFactory: PlaybackEngineFactory = (opts) =>
   new HtmlVideoEngine(opts);
+
+/**
+ * Parse a `Project.aspect` string like "16:9" into a `[w, h]` tuple.
+ * Returns null for missing / malformed input so callers can fall
+ * back to the source video's intrinsic aspect (today's behaviour).
+ */
+function parseAspect(value: string | undefined | null): [number, number] | null {
+  if (!value) return null;
+  const m = value.match(/^\s*(\d+(?:\.\d+)?)\s*:\s*(\d+(?:\.\d+)?)\s*$/);
+  if (!m) return null;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+    return null;
+  }
+  return [w, h];
+}

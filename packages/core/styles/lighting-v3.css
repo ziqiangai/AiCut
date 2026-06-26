@@ -18,8 +18,8 @@
   --aicut-lv3-control-border: rgba(26, 26, 26, 0.16);
   --aicut-lv3-input-card-fill: rgba(26, 26, 26, 0.06);
   --aicut-lv3-sphere-inner: rgba(0, 0, 0, 0.08);
-  --aicut-lv3-brand: var(--color-brand, #ff3386);
-  --aicut-lv3-brand-soft: rgba(255, 51, 134, 0.18);
+  --aicut-lv3-brand: var(--color-brand, #9a31f4);
+  --aicut-lv3-brand-soft: rgba(154, 49, 244, 0.18);
 
   width: 100%;
   padding: 20px;
@@ -271,7 +271,7 @@
   padding: 0;
 }
 .aicut-lighting-v3-toggle.active {
-  background: rgba(255, 51, 134, 0.32);
+  background: rgba(154, 49, 244, 0.32);
 }
 .aicut-lighting-v3-toggle-thumb {
   position: absolute;

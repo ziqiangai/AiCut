@@ -17,7 +17,7 @@
 
 .aicut-root {
   /* Brand tokens — same names as iqvise's globals.css. */
-  --color-brand: var(--color-brand, #ff3386);
+  --color-brand: var(--color-brand, #9a31f4);
   --color-secondary: var(--color-secondary, #9a31f4);
   --color-surface: var(--color-surface, #f8f7fa);
   --color-dark: var(--color-dark, #1a1a1a);
@@ -180,9 +180,9 @@
 
 .aicut-keyframe-panel__row input:focus {
   outline: none;
-  border-color: var(--color-brand, #ff3386);
+  border-color: var(--color-brand, #9a31f4);
   background: var(--aicut-controls-active, rgba(255, 255, 255, 0.1));
-  box-shadow: 0 0 0 2px rgba(255, 51, 134, 0.22);
+  box-shadow: 0 0 0 2px rgba(154, 49, 244, 0.22);
 }
 
 /* Small dot to the right of each input — filled = this prop pins
@@ -202,9 +202,9 @@
     border-color 100ms ease-out;
 }
 .aicut-keyframe-panel__badge--on {
-  background: var(--color-brand, #ff3386);
-  border-color: var(--color-brand, #ff3386);
-  box-shadow: 0 0 6px rgba(255, 51, 134, 0.5);
+  background: var(--color-brand, #9a31f4);
+  border-color: var(--color-brand, #9a31f4);
+  box-shadow: 0 0 6px rgba(154, 49, 244, 0.5);
 }
 
 /* Custom easing dropdown — themed to match the rest of the panel.
@@ -238,17 +238,17 @@
 }
 .aicut-keyframe-panel__dropdown-trigger:hover {
   background: var(--aicut-controls-active, rgba(255, 255, 255, 0.1));
-  border-color: var(--color-brand, #ff3386);
+  border-color: var(--color-brand, #9a31f4);
 }
 .aicut-keyframe-panel__dropdown-trigger:focus-visible {
   outline: none;
-  border-color: var(--color-brand, #ff3386);
-  box-shadow: 0 0 0 2px rgba(255, 51, 134, 0.22);
+  border-color: var(--color-brand, #9a31f4);
+  box-shadow: 0 0 0 2px rgba(154, 49, 244, 0.22);
 }
 .aicut-keyframe-panel__dropdown-trigger--open {
-  border-color: var(--color-brand, #ff3386);
+  border-color: var(--color-brand, #9a31f4);
   background: var(--aicut-controls-active, rgba(255, 255, 255, 0.1));
-  box-shadow: 0 0 0 2px rgba(255, 51, 134, 0.22);
+  box-shadow: 0 0 0 2px rgba(154, 49, 244, 0.22);
 }
 .aicut-keyframe-panel__dropdown-trigger--disabled,
 .aicut-keyframe-panel__dropdown-trigger:disabled {
@@ -282,7 +282,7 @@
   .aicut-keyframe-panel__dropdown-chevron {
   transform: rotate(180deg);
   opacity: 1;
-  color: var(--color-brand, #ff3386);
+  color: var(--color-brand, #9a31f4);
 }
 
 /* Floating menu. Positioned right under the trigger; the panel
@@ -302,7 +302,7 @@
   border-radius: 8px;
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.32),
-    0 0 0 1px rgba(255, 51, 134, 0.06);
+    0 0 0 1px rgba(154, 49, 244, 0.06);
   backdrop-filter: blur(8px);
   animation: aicut-keyframe-dropdown-in 120ms ease-out;
 }
@@ -336,7 +336,7 @@
   background: var(--aicut-controls-active, rgba(255, 255, 255, 0.1));
 }
 .aicut-keyframe-panel__dropdown-item--selected {
-  color: var(--color-brand, #ff3386);
+  color: var(--color-brand, #9a31f4);
 }
 /* Checkmark for the selected item — drawn with two CSS borders. */
 .aicut-keyframe-panel__dropdown-item--selected::before {
@@ -379,7 +379,7 @@
 
 .aicut-keyframe-panel__reset:hover:not(:disabled) {
   background: var(--aicut-controls-active, rgba(255, 255, 255, 0.1));
-  border-color: var(--color-brand, #ff3386);
+  border-color: var(--color-brand, #9a31f4);
 }
 
 .aicut-keyframe-panel__reset:disabled {
@@ -400,15 +400,23 @@
 
 .aicut-keyframe-overlay__frame {
   position: absolute;
-  border: 1.5px dashed var(--color-brand, #ff3386);
+  border: 1.5px dashed var(--color-brand, #9a31f4);
   background: transparent;
-  pointer-events: auto;
-  cursor: move;
+  /* Passive by default — frame is a pure outline that visualises the
+     output canvas. Without --interactive, clicks fall through to the
+     preview so the user can still interact with whatever lives below. */
+  pointer-events: none;
+  cursor: default;
   box-sizing: border-box;
   transition:
     border-color 100ms ease-out,
     border-style 100ms ease-out,
     box-shadow 120ms ease-out;
+}
+
+.aicut-keyframe-overlay--interactive .aicut-keyframe-overlay__frame {
+  pointer-events: auto;
+  cursor: move;
 }
 
 /* Warn state — content doesn't fully cover the output frame, i.e.
@@ -429,11 +437,18 @@
   width: 12px;
   height: 12px;
   background: var(--aicut-controls-bg, #1f1f22);
-  border: 1.5px solid var(--color-brand, #ff3386);
+  border: 1.5px solid var(--color-brand, #9a31f4);
   border-radius: 2px;
   pointer-events: auto;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
   transition: transform 80ms ease-out;
+  /* Handles belong to keyframe editing. Hide them when the overlay
+     is in passive (outline-only) mode. */
+  display: none;
+}
+
+.aicut-keyframe-overlay--interactive .aicut-keyframe-overlay__handle {
+  display: block;
 }
 
 .aicut-keyframe-overlay__handle:hover {
@@ -551,6 +566,29 @@
   border-top: 1px solid var(--aicut-controls-border);
   border-bottom: 1px solid var(--aicut-controls-border);
   background: var(--aicut-controls-bg);
+  /* Single-row layout — horizontal scroll fallback only when the
+     editor is too narrow for the toolbar's natural content width.
+     Without overflow-x, the editor root's `overflow: hidden` would
+     silently clip the right cluster (looks like the sidebar covers
+     the editor). With it, the user can scroll to reach hidden
+     controls instead of having the chrome reflow to two rows. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.aicut-toolbar::-webkit-scrollbar {
+  height: 6px;
+  background: transparent;
+}
+
+.aicut-toolbar::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--aicut-controls-text) 28%, transparent);
+  border-radius: 999px;
+}
+
+.aicut-toolbar::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--aicut-controls-text) 45%, transparent);
 }
 
 .aicut-toolbar-left,
@@ -559,7 +597,13 @@
   align-items: center;
   gap: 8px;
   flex: 1 1 0;
-  min-width: 0;
+  /* Default flex `min-width: auto` resolves to the content's
+     min-content — i.e. the group can shrink down to the slider's
+     min-width but no further. Without this, the group collapsed
+     past its content, the toolbar never saw overflow, and the right
+     cluster got silently clipped by the editor root's
+     `overflow: hidden`. Now the toolbar's `overflow-x: auto`
+     correctly engages when the viewport is too narrow. */
 }
 
 .aicut-toolbar-right {
@@ -679,12 +723,12 @@
 }
 
 .aicut-play-btn[data-state="playing"] {
-  background: var(--color-brand, #ff3386);
+  background: var(--color-brand, #9a31f4);
   color: #fff;
 }
 
 .aicut-play-btn[data-state="playing"]:hover {
-  background: color-mix(in srgb, var(--color-brand, #ff3386) 88%, black);
+  background: color-mix(in srgb, var(--color-brand, #9a31f4) 88%, black);
 }
 
 .aicut-time-current,
@@ -716,7 +760,7 @@
   );
   appearance: none;
   -webkit-appearance: none;
-  width: 140px;
+  width: 96px;
   /* Allow the slider to absorb horizontal pressure when extras
      populate the toolbar — it's the only element here with
      legitimate flex-stretch semantics. Hard floor at 60px keeps
@@ -1018,9 +1062,9 @@
   background: var(--aicut-controls-hover, rgba(255, 255, 255, 0.08));
 }
 .aicut-lighting-dir-btn.active {
-  background: color-mix(in srgb, var(--color-brand, #ff3386) 18%, transparent);
-  border-color: var(--color-brand, #ff3386);
-  color: var(--color-brand, #ff3386);
+  background: color-mix(in srgb, var(--color-brand, #9a31f4) 18%, transparent);
+  border-color: var(--color-brand, #9a31f4);
+  color: var(--color-brand, #9a31f4);
 }
 
 .aicut-lighting-toggle {
@@ -1033,7 +1077,7 @@
   transition: background-color 120ms ease;
 }
 .aicut-lighting-toggle.active {
-  background: var(--color-brand, #ff3386);
+  background: var(--color-brand, #9a31f4);
 }
 .aicut-lighting-toggle-thumb {
   width: 14px;
@@ -1067,3 +1111,135 @@
   display: none;
 }
 
+
+/* ===== Aspect-ratio picker (built-in, opt-in via aspect.enabled) ===== */
+
+.aicut-aspect-picker {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.aicut-aspect-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px solid var(--aicut-controls-border);
+  background: transparent;
+  color: var(--aicut-controls-text);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.aicut-aspect-trigger:hover {
+  background: var(--aicut-controls-hover);
+}
+
+.aicut-aspect-trigger[aria-expanded="true"] {
+  background: var(--aicut-controls-active);
+  border-color: color-mix(in srgb, var(--color-brand, #9a31f4) 60%, transparent);
+}
+
+.aicut-aspect-trigger-label {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  min-width: 22px;
+  text-align: center;
+}
+
+.aicut-aspect-trigger-caret {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.55;
+  line-height: 0;
+}
+
+/* Popover lives on document.body (escapes overflow clipping) — give
+   it its own surface tokens rather than inheriting whatever the
+   toolbar's parent owns. */
+.aicut-aspect-menu {
+  z-index: 9999;
+  min-width: 240px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--aicut-controls-bg);
+  color: var(--aicut-controls-text);
+  border: 1px solid var(--aicut-controls-border);
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.18),
+    0 2px 6px rgba(0, 0, 0, 0.08);
+  font-size: 12px;
+}
+
+.aicut-aspect-menu-header {
+  padding: 4px 6px 8px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.65;
+}
+
+.aicut-aspect-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.aicut-aspect-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 4px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.aicut-aspect-option:hover {
+  background: var(--aicut-controls-hover);
+}
+
+.aicut-aspect-option-active {
+  border-color: color-mix(in srgb, var(--color-brand, #9a31f4) 70%, transparent);
+  background: color-mix(in srgb, var(--color-brand, #9a31f4) 12%, transparent);
+}
+
+.aicut-aspect-option-tile-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+}
+
+.aicut-aspect-option-tile {
+  display: block;
+  border-radius: 2px;
+  border: 1.4px solid currentColor;
+  opacity: 0.85;
+  max-width: 26px;
+  max-height: 22px;
+}
+
+.aicut-aspect-option-active .aicut-aspect-option-tile {
+  border-color: var(--color-brand, #9a31f4);
+  background: color-mix(in srgb, var(--color-brand, #9a31f4) 18%, transparent);
+  opacity: 1;
+}
+
+.aicut-aspect-option-label {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}

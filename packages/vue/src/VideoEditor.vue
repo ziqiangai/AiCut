@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   Editor,
+  type AspectRatio,
   type EditorApi,
   type Locale,
   type Ms,
@@ -55,6 +56,21 @@ const props = defineProps<{
    * entirely (no toolbar space cost).
    */
   clipEdgeNav?: { enabled?: boolean };
+  /**
+   * Dashed outline of the output canvas on top of the preview.
+   * Defaults to `{ enabled: true }` — purely visual. Set
+   * `{ enabled: false }` to hide it entirely. Independent of
+   * `keyframes`; when keyframes mode is also on the frame body
+   * becomes draggable and grows corner scale handles.
+   */
+  previewFrame?: { enabled?: boolean };
+  /**
+   * Built-in aspect-ratio picker (CapCut-style 比例 dropdown). Reactive
+   * — set `{ enabled: true }` to surface the chip at the left of the
+   * toolbar. Listen for `aspectChange` to drive your preview letterbox
+   * / export defaults.
+   */
+  aspect?: { enabled?: boolean };
 }>();
 
 const emit = defineEmits<{
@@ -69,6 +85,7 @@ const emit = defineEmits<{
     e: "keyframeSelectionChange",
     target: { clipId: string; keyframeId: string } | null,
   ): void;
+  (e: "aspectChange", aspect: AspectRatio | null): void;
   (e: "error", error: Error): void;
 }>();
 
@@ -96,6 +113,10 @@ onMounted(() => {
       : {}),
     ...(props.keyframes != null ? { keyframes: props.keyframes } : {}),
     ...(props.clipEdgeNav != null ? { clipEdgeNav: props.clipEdgeNav } : {}),
+    ...(props.previewFrame != null
+      ? { previewFrame: props.previewFrame }
+      : {}),
+    ...(props.aspect != null ? { aspect: props.aspect } : {}),
   });
 
   offs.push(
@@ -110,6 +131,7 @@ onMounted(() => {
     editor.on("keyframeSelectionChange", ({ target }) =>
       emit("keyframeSelectionChange", target),
     ),
+    editor.on("aspectChange", ({ aspect }) => emit("aspectChange", aspect)),
     editor.on("error", ({ error }) => emit("error", error)),
   );
 
@@ -152,6 +174,30 @@ watch(
     const desired = enabled === true;
     if (editor.isClipEdgeNavEnabled() !== desired) {
       editor.setClipEdgeNavEnabled(desired);
+    }
+  },
+);
+
+// Reactive — flip the dashed output-frame outline.
+watch(
+  () => props.previewFrame?.enabled,
+  (enabled) => {
+    if (!editor) return;
+    const desired = enabled !== false;
+    if (editor.isPreviewFrameEnabled() !== desired) {
+      editor.setPreviewFrameEnabled(desired);
+    }
+  },
+);
+
+// Reactive — flip built-in aspect picker visibility.
+watch(
+  () => props.aspect?.enabled,
+  (enabled) => {
+    if (!editor) return;
+    const desired = enabled === true;
+    if (editor.isAspectEnabled() !== desired) {
+      editor.setAspectEnabled(desired);
     }
   },
 );

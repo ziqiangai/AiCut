@@ -21,6 +21,7 @@ import {
 import { applyTheme } from "./theme.js";
 import { type Locale, mergeLocale } from "./i18n.js";
 import type {
+  AspectRatio,
   Clip,
   EasingKind,
   Keyframe,
@@ -110,6 +111,32 @@ export interface EditorOptions {
    * space, and the I / O keys fall through to the page.
    */
   clipEdgeNav?: { enabled?: boolean };
+  /**
+   * Dashed output-frame outline on top of the preview. Independent
+   * of keyframes mode — the frame is purely visual (it shows the
+   * fixed output canvas where the video lands after transforms), so
+   * it's useful even when keyframe editing is off (e.g. to visualize
+   * the current aspect-ratio choice). On by default; pass
+   * `{ enabled: false }` to hide it entirely. When keyframes mode is
+   * also on, the frame body becomes draggable (pan) and grows corner
+   * scale handles — both are gated by `keyframes.enabled` regardless
+   * of this flag.
+   */
+  previewFrame?: { enabled?: boolean };
+  /**
+   * Built-in aspect-ratio picker (CapCut-style "比例" dropdown).
+   * Off by default — hosts who want to provide their own picker keep
+   * today's behaviour by leaving this off and rendering a control
+   * into `editor.toolbarLeft`. When `enabled: true`, the editor
+   * renders the picker before the left-hand button cluster and emits
+   * `aspectChange` whenever the user picks. The selected value is
+   * persisted on `Project.aspect`.
+   *
+   * Hosts wire `onAspectChange` to update their preview letterbox /
+   * export defaults — the library does not letterbox the preview by
+   * itself (different engines have different paint pipelines).
+   */
+  aspect?: { enabled?: boolean };
 }
 
 export interface EditorEventMap {
@@ -136,6 +163,20 @@ export interface EditorEventMap {
   keyframesEnabledChange: { enabled: boolean };
   /** Jump-to-clip-edge nav toggle changed (Editor.setClipEdgeNavEnabled). */
   clipEdgeNavEnabledChange: { enabled: boolean };
+  /** Output-frame outline visibility flipped (Editor.setPreviewFrameEnabled). */
+  previewFrameEnabledChange: { enabled: boolean };
+  /**
+   * Aspect-ratio picker toggle changed (Editor.setAspectEnabled). Only
+   * fires when the host-facing visibility flips — picking a new ratio
+   * fires `aspectChange` instead.
+   */
+  aspectEnabledChange: { enabled: boolean };
+  /**
+   * User (or programmatic call) chose a different output aspect ratio.
+   * `aspect` is null when cleared back to "Original" (use the source
+   * clip's intrinsic aspect). Persisted on `Project.aspect`.
+   */
+  aspectChange: { aspect: AspectRatio | null };
   /** Zoom (px/sec) changed. */
   scaleChange: { pxPerSec: number };
   /** Snap toggle changed. */
@@ -221,6 +262,21 @@ export interface EditorApi {
   setKeyframesEnabled(enabled: boolean): void;
   isClipEdgeNavEnabled(): boolean;
   setClipEdgeNavEnabled(enabled: boolean): void;
+  /** Dashed output-frame outline visibility. Defaults to true. */
+  isPreviewFrameEnabled(): boolean;
+  setPreviewFrameEnabled(enabled: boolean): void;
+  /** Built-in aspect picker visibility (CapCut-style 比例 dropdown). */
+  isAspectEnabled(): boolean;
+  setAspectEnabled(enabled: boolean): void;
+  /** Current output aspect ratio, or null when "Original" (follow source). */
+  getAspect(): AspectRatio | null;
+  /**
+   * Set the output aspect ratio. Pass `null` to clear back to
+   * "Original". Persists on `Project.aspect`, emits `aspectChange`,
+   * and pushes a history entry so the change participates in undo.
+   * No-op when the value didn't change.
+   */
+  setAspect(aspect: AspectRatio | null): void;
   /** Screen-space CSS-pixel rect of the active rendered frame, post
    *  transform, relative to the editor preview. Null when none. */
   getActiveFrameRect():
@@ -410,6 +466,8 @@ export class Editor implements EditorApi {
     null;
   private keyframesEnabled: boolean;
   private clipEdgeNavEnabled: boolean;
+  private aspectEnabled: boolean;
+  private previewFrameEnabled: boolean;
   /** Drag-session bookkeeping for ripple-merge undo. See
    *  beginInteraction / endInteraction docs on EditorApi. */
   private interactionDepth = 0;
@@ -427,6 +485,11 @@ export class Editor implements EditorApi {
     this.locale = mergeLocale(opts.locale);
     this.keyframesEnabled = opts.keyframes?.enabled === true;
     this.clipEdgeNavEnabled = opts.clipEdgeNav?.enabled === true;
+    this.aspectEnabled = opts.aspect?.enabled === true;
+    // Default true — the dashed frame is purely visual and harmless
+    // even when keyframe editing is off; hosts who want a clean
+    // preview pass `previewFrame: { enabled: false }` to opt out.
+    this.previewFrameEnabled = opts.previewFrame?.enabled !== false;
 
     // Must run before EditorUI builds the Timeline — those layout
     // values are read at canvas init time.
@@ -470,6 +533,7 @@ export class Editor implements EditorApi {
       onKeyframeToggle: () => this.toggleKeyframeAtPlayhead(),
       onSeekClipStart: () => this.seekToSelectedClipEdge("start"),
       onSeekClipEnd: () => this.seekToSelectedClipEdge("end"),
+      onAspectChange: (a) => this.setAspect(a),
     });
 
     const engineFactory: PlaybackEngineFactory =
@@ -1111,6 +1175,45 @@ export class Editor implements EditorApi {
     this.clipEdgeNavEnabled = enabled;
     this.bus.emit("clipEdgeNavEnabledChange", { enabled });
     this.ui.render();
+  }
+
+  isPreviewFrameEnabled(): boolean {
+    return this.previewFrameEnabled;
+  }
+
+  setPreviewFrameEnabled(enabled: boolean): void {
+    if (enabled === this.previewFrameEnabled) return;
+    this.previewFrameEnabled = enabled;
+    this.bus.emit("previewFrameEnabledChange", { enabled });
+    this.ui.render();
+  }
+
+  isAspectEnabled(): boolean {
+    return this.aspectEnabled;
+  }
+
+  setAspectEnabled(enabled: boolean): void {
+    if (enabled === this.aspectEnabled) return;
+    this.aspectEnabled = enabled;
+    this.bus.emit("aspectEnabledChange", { enabled });
+    this.ui.render();
+  }
+
+  getAspect(): AspectRatio | null {
+    return this.project.aspect ?? null;
+  }
+
+  setAspect(aspect: AspectRatio | null): void {
+    const current = this.project.aspect ?? null;
+    if (aspect === current) return;
+    this.pushHistory();
+    if (aspect == null) {
+      delete this.project.aspect;
+    } else {
+      this.project.aspect = aspect;
+    }
+    this.afterMutation();
+    this.bus.emit("aspectChange", { aspect });
   }
 
   addKeyframe(

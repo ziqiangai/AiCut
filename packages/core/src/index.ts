@@ -15,6 +15,7 @@ export type {
   EasingKind,
   Ms,
   Theme,
+  AspectRatio,
 } from "./types.js";
 
 // Keyframe interpolation — hosts can read the effective transform of a
