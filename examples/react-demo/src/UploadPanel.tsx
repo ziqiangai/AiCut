@@ -23,14 +23,6 @@ export interface UploadResult {
 interface Props {
   uploadEndpoint: string | null;
   onUploaded: (r: UploadResult) => void;
-  /** Where the next dropped file will land — drives the badge below
-   *  the drop zone. `mainTrackIndex: 0` means "track 1, primary";
-   *  anything else implies a PiP overlay slot, and the badge tells
-   *  the user that's the case so they're not surprised. */
-  nextTrackIndex?: number;
-  /** Total number of video tracks in the project — used to format
-   *  the "Track X / N" line. */
-  videoTrackCount?: number;
 }
 
 /**
@@ -44,12 +36,7 @@ interface Props {
  * Tries to probe the video's duration via a transient `<video>` so the
  * editor seeds an accurate clip length on first drop.
  */
-export function UploadPanel({
-  uploadEndpoint,
-  onUploaded,
-  nextTrackIndex,
-  videoTrackCount,
-}: Props) {
+export function UploadPanel({ uploadEndpoint, onUploaded }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -151,39 +138,6 @@ export function UploadPanel({
             ? `Upload endpoint set → POSTs to the backend`
             : `VITE_UPLOAD_ENDPOINT unset → local blob preview only`}
         </div>
-        {nextTrackIndex != null && videoTrackCount != null ? (
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 5,
-              marginTop: 8,
-              padding: "2px 8px",
-              fontSize: 10,
-              letterSpacing: "0.02em",
-              borderRadius: 999,
-              border: "1px solid var(--aicut-controls-border, rgba(255,255,255,0.18))",
-              background:
-                nextTrackIndex > 0
-                  ? "rgba(154, 49, 244, 0.16)"
-                  : "transparent",
-              color:
-                nextTrackIndex > 0
-                  ? "var(--color-brand, #9a31f4)"
-                  : "var(--aicut-controls-text, rgba(255,255,255,0.6))",
-            }}
-          >
-            {nextTrackIndex > 0 ? (
-              <PipIcon />
-            ) : (
-              <MainTrackIcon />
-            )}
-            <span>
-              Next → Track {nextTrackIndex + 1}
-              {nextTrackIndex > 0 ? " (PiP overlay)" : ""}
-            </span>
-          </div>
-        ) : null}
       </div>
       <input
         ref={inputRef}
@@ -229,24 +183,3 @@ function probeDuration(url: string): Promise<number> {
   });
 }
 
-/** Filmstrip-with-cut icon — main / first track. */
-function MainTrackIcon() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="1.5" y="3" width="13" height="10" rx="1.4" stroke="currentColor" strokeWidth="1.3" />
-      <line x1="4" y1="5" x2="4" y2="11" stroke="currentColor" strokeWidth="1" />
-      <line x1="12" y1="5" x2="12" y2="11" stroke="currentColor" strokeWidth="1" />
-    </svg>
-  );
-}
-
-/** Picture-in-picture icon — outer frame with a smaller frame inset
- *  at the top-right corner. Mirrors the browser's native PiP glyph. */
-function PipIcon() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="1.5" y="2.5" width="13" height="11" rx="1.4" stroke="currentColor" strokeWidth="1.3" />
-      <rect x="8" y="5.5" width="5.5" height="4.5" rx="0.8" fill="currentColor" opacity="0.8" />
-    </svg>
-  );
-}

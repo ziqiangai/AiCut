@@ -130,15 +130,21 @@ export interface VideoEditorProps {
    * upload the file twice for separate ids if you need both ends
    * playing independently.
    *
-   * `toolbarToggle: true` surfaces a built-in PiP icon button next
-   * to the keyframe button. Clicking it flips `enabled`. Defaults
-   * to false so the toolbar chrome stays unchanged for hosts that
-   * roll their own UI.
+   * `toolbarAdd: true` surfaces a built-in "+ PiP overlay" icon
+   * button next to the keyframe affordance. Clicking it fires
+   * `onPictureInPictureAddRequested` — the LIBRARY doesn't run an
+   * upload itself; the host wires up its own file picker / upload
+   * pipeline and inserts the resulting clip wherever fits.
    */
   pictureInPicture?: {
     enabled?: boolean;
-    toolbarToggle?: boolean;
+    toolbarAdd?: boolean;
   };
+  /** Fires when the user clicks the built-in "+ PiP overlay"
+   *  toolbar button (only present when `pictureInPicture.toolbarAdd`
+   *  is true). Host should open a file picker, upload, and create
+   *  a new clip on an overlay track. */
+  onPictureInPictureAddRequested?: () => void;
   /**
    * Dashed outline of the output canvas on top of the preview.
    * Defaults to `{ enabled: true }` — the frame is purely visual
@@ -246,6 +252,9 @@ export function VideoEditor(props: VideoEditorProps) {
       ),
       editor.on("aspectChange", ({ aspect }) =>
         cbRef.current.onAspectChange?.(aspect),
+      ),
+      editor.on("requestPictureInPictureAdd", () =>
+        cbRef.current.onPictureInPictureAddRequested?.(),
       ),
       editor.on("error", ({ error }) => cbRef.current.onError?.(error)),
     ];

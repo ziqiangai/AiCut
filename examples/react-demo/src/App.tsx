@@ -711,13 +711,6 @@ export function App() {
   const apiRef = useRef<VideoEditorApi | null>(null);
   const toast = useToast();
   const [savedJson, setSavedJson] = useState("");
-  // Track-occupancy summary, refreshed every project mutation. Drives
-  // the upload zone's "Next → Track N" badge so users know whether
-  // their next drop becomes the main video or the PiP overlay.
-  const [trackOccupancy, setTrackOccupancy] = useState<{
-    videoTrackCount: number;
-    nextEmptyIndex: number;
-  }>({ videoTrackCount: 2, nextEmptyIndex: 0 });
   const [exportJson, setExportJson] = useState("");
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
@@ -952,6 +945,124 @@ export function App() {
     exportAbortRef.current?.abort();
   };
 
+  // Hidden file input the toolbar "+ PiP overlay" button drives.
+  const pipFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  /**
+   * Wired to the editor's `requestPictureInPictureAdd` event — when
+   * the toolbar's "+ PiP overlay" button fires, surface a file
+   * picker. The picked file flows through the same upload pipeline
+   * as the sidebar (server upload when configured, else local blob
+   * URL); the resulting clip lands on a fresh video track so it
+   * stacks on top of the main track per the engine's z-order
+   * convention.
+   */
+  const triggerPipUpload = (): void => {
+    pipFileInputRef.current?.click();
+  };
+
+  const handlePipFile = async (file: File): Promise<void> => {
+    const api = apiRef.current;
+    if (!api) {
+      toast.push("Editor isn't ready yet — try again in a moment.", { variant: "warn" });
+      return;
+    }
+    let url: string;
+    let isLocal: boolean;
+    try {
+      if (UPLOAD_ENDPOINT) {
+        const form = new FormData();
+        form.append("file", file, file.name);
+        const res = await fetch(UPLOAD_ENDPOINT, { method: "POST", body: form });
+        if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
+        const data = (await res.json()) as { url?: string };
+        if (!data.url) throw new Error("Upload response missing `url` field");
+        url = data.url;
+        isLocal = false;
+      } else {
+        url = URL.createObjectURL(file);
+        isLocal = true;
+        toast.push(
+          "VITE_UPLOAD_ENDPOINT not set — the PiP overlay uses a local blob URL. Playable in this browser only, can't be exported.",
+          { variant: "warn", duration: 5000 },
+        );
+      }
+    } catch (e) {
+      toast.push(`PiP upload error: ${e instanceof Error ? e.message : String(e)}`, {
+        variant: "error",
+      });
+      return;
+    }
+    // Probe duration via a transient <video>.
+    const durationMs = await new Promise<number | undefined>((resolve) => {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.muted = true;
+      v.src = url;
+      const timeout = setTimeout(() => resolve(undefined), 5000);
+      v.onloadedmetadata = () => {
+        clearTimeout(timeout);
+        const ms = Math.round(v.duration * 1000);
+        resolve(Number.isFinite(ms) && ms > 0 ? ms : undefined);
+      };
+      v.onerror = () => {
+        clearTimeout(timeout);
+        resolve(undefined);
+      };
+    });
+
+    const project = api.getProject();
+    const sourceId = createId("src");
+    const clipId = createId("clip");
+    // Find the first non-track-0 video track without overlapping
+    // clips at the playhead; create a fresh track when there's none.
+    const playhead = api.getTime();
+    const overlayTrackIdx = project.tracks.findIndex((t, i) => {
+      if (t.kind !== "video") return false;
+      if (i === 0) return false;
+      return !t.clips.some(
+        (c) => playhead >= c.start && playhead < c.start + (c.out - c.in),
+      );
+    });
+    const usableDurationMs = durationMs ?? 5000;
+    const newClip = {
+      id: clipId,
+      sourceId,
+      in: 0,
+      out: usableDurationMs,
+      // Land at the playhead so the user sees the PiP overlay
+      // immediately at the current preview time.
+      start: playhead,
+      // Centered + scaled — pre-seeds the PiP as a small frame
+      // inside the canvas. User drags from there.
+      scale: 0.4,
+    };
+    const next: Project = {
+      ...project,
+      sources: [
+        ...project.sources,
+        { id: sourceId, url, kind: "video", name: file.name, duration: durationMs },
+      ],
+      tracks:
+        overlayTrackIdx >= 0
+          ? project.tracks.map((t, i) =>
+              i === overlayTrackIdx ? { ...t, clips: [...t.clips, newClip] } : t,
+            )
+          : [
+              ...project.tracks,
+              {
+                id: createId("track"),
+                kind: "video" as const,
+                clips: [newClip],
+              },
+            ],
+    };
+    api.setProject(next);
+    if (!isLocal) {
+      toast.push(`Added PiP overlay: ${file.name}`, { variant: "success" });
+    }
+  };
+
   /**
    * Handler the UploadPanel calls after a video resolves to a URL
    * (either a server-uploaded http URL or a local blob URL). Adds the
@@ -967,17 +1078,7 @@ export function App() {
     }
     const project = api.getProject();
     const sourceId = createId("src");
-    // Route to the first EMPTY video track so the second upload
-    // naturally becomes the PiP overlay (track 1) without the user
-    // having to drag clips around. Falls back to the first video
-    // track when every track already has clips — host can drag the
-    // new clip wherever they want from there.
-    let trackIdx = project.tracks.findIndex(
-      (t) => t.kind === "video" && t.clips.length === 0,
-    );
-    if (trackIdx < 0) {
-      trackIdx = project.tracks.findIndex((t) => t.kind === "video");
-    }
+    const trackIdx = project.tracks.findIndex((t) => t.kind === "video");
     if (trackIdx < 0) {
       toast.push("No video track available.", { variant: "warn" });
       return;
@@ -988,11 +1089,6 @@ export function App() {
       0,
     );
     const durationMs = r.durationMs ?? 5000;
-    // When this upload is becoming the PiP overlay (lands on track
-    // index > 0), pre-shrink it to a corner so the user sees the PiP
-    // effect immediately instead of a full-canvas video covered by
-    // the bottom track. They can still tweak via keyframes later.
-    const isPipOverlay = trackIdx > 0;
     const next: Project = {
       ...project,
       sources: [
@@ -1017,19 +1113,6 @@ export function App() {
                   in: 0,
                   out: durationMs,
                   start: tail,
-                  ...(isPipOverlay
-                    ? {
-                        // Land the PiP overlay centered + scaled down
-                        // so it stays INSIDE the output canvas
-                        // regardless of preview dims. Absolute CSS-px
-                        // offsets (what `panX/Y` use) can't reliably
-                        // hit a corner without knowing the live
-                        // canvas size, so center is the safe pre-
-                        // seed; the user drags it where they want
-                        // via the overlay handles.
-                        scale: 0.4,
-                      }
-                    : {}),
                 },
               ],
             }
@@ -1037,12 +1120,6 @@ export function App() {
       ),
     };
     api.setProject(next);
-    if (isPipOverlay) {
-      toast.push(
-        `Added to track ${trackIdx + 1} as a PiP overlay — enable Picture-in-picture in the sidebar to see it.`,
-        { variant: "info", duration: 4500 },
-      );
-    }
   };
 
   // Note: `onReady` is the right hook to expose the API to e2e via
@@ -1070,10 +1147,14 @@ export function App() {
           timelineHeight={timelineHeight}
           pictureInPicture={{
             enabled: pipEnabled,
-            // Surface the built-in toolbar toggle so users have a
-            // visible affordance — no separate sidebar checkbox.
-            toolbarToggle: true,
+            // Surface the "+ PiP overlay" toolbar action so users
+            // can trigger an upload from inside the editor. The
+            // ENABLE flag stays a host concern (sidebar checkbox);
+            // the toolbar button is purely "add a PiP", not a
+            // toggle.
+            toolbarAdd: true,
           }}
+          onPictureInPictureAddRequested={triggerPipUpload}
           keyframes={{ enabled: keyframesEnabled }}
           clipEdgeNav={{ enabled: clipEdgeNavEnabled }}
           aspect={{ enabled: true }}
@@ -1253,15 +1334,7 @@ export function App() {
               api.setProject(project);
             });
           }}
-          onChange={(p) => {
-            setSavedJson(JSON.stringify(p, null, 2));
-            const videoTracks = p.tracks.filter((t) => t.kind === "video");
-            const empty = videoTracks.findIndex((t) => t.clips.length === 0);
-            setTrackOccupancy({
-              videoTrackCount: videoTracks.length,
-              nextEmptyIndex: empty < 0 ? 0 : empty,
-            });
-          }}
+          onChange={(p) => setSavedJson(JSON.stringify(p, null, 2))}
           onExport={(p) => {
             setExportJson(JSON.stringify(p, null, 2));
             const res = RESOLUTIONS[exportAspect][exportResIdx]
@@ -1273,6 +1346,19 @@ export function App() {
             });
           }}
         />
+        {/* Hidden — driven by the toolbar "+ PiP overlay" button. */}
+        <input
+          ref={pipFileInputRef}
+          type="file"
+          accept="video/*"
+          style={{ display: "none" }}
+          data-testid="demo-pip-file-input"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handlePipFile(f);
+            e.target.value = "";
+          }}
+        />
       </div>
       <aside className="demo-sidebar">
         <h2>Upload video</h2>
@@ -1280,8 +1366,6 @@ export function App() {
           <UploadPanel
             uploadEndpoint={UPLOAD_ENDPOINT}
             onUploaded={handleUploaded}
-            nextTrackIndex={trackOccupancy.nextEmptyIndex}
-            videoTrackCount={trackOccupancy.videoTrackCount}
           />
         </div>
 
@@ -1399,12 +1483,22 @@ export function App() {
         </div>
 
         <h2>Picture-in-picture</h2>
+        <div className="demo-row demo-checkbox-row">
+          <label>
+            <input
+              type="checkbox"
+              data-testid="demo-pip-toggle"
+              checked={pipEnabled}
+              onChange={(e) => setPipEnabled(e.target.checked)}
+            />
+            <span>Enable multi-track preview compositing</span>
+          </label>
+        </div>
         <p className="demo-engine-help">
-          Toggle from the toolbar (
-          <strong>{pipEnabled ? "currently ON" : "currently OFF"}</strong>).
-          Drop a video onto Video 1 (main) and a second onto Video 2
-          (PiP overlay, auto-shrunk to scale 0.4 + centered). Higher
-          tracks paint on top; lower tracks mute their audio.
+          Toggle compositing here. The toolbar's "+ PiP overlay"
+          button uploads a video onto a new overlay track (centered
+          + scale 0.4). Higher tracks paint on top; lower tracks
+          mute their audio.
         </p>
 
         <h2>Keyframes</h2>

@@ -35,13 +35,9 @@ export interface Locale {
   /** Toolbar tooltip — jump the playhead to the selected clip's end. */
   seekClipEnd: string;
 
-  /** Toolbar tooltip — enable picture-in-picture (when off). */
-  pipEnable: string;
-  /** Toolbar tooltip — disable picture-in-picture (when on). */
-  pipDisable: string;
-  /** Generic tooltip shown when the PiP button first mounts before
-   *  state has been written — only ever briefly visible. */
-  pipToggle: string;
+  /** Toolbar tooltip — "+ PiP overlay" action button (host's file
+   *  picker takes over on click). */
+  pipAdd: string;
 
   // Aspect-ratio picker (built-in, opt-in via aspect.enabled)
   /** Toolbar button tooltip — opens the aspect picker popover. */
@@ -112,9 +108,7 @@ export const localeEn: Locale = {
   keyframeRemove: "Remove keyframe at playhead",
   seekClipStart: "Jump to clip start (I)",
   seekClipEnd: "Jump to clip end (O)",
-  pipEnable: "Enable picture-in-picture",
-  pipDisable: "Disable picture-in-picture",
-  pipToggle: "Picture-in-picture",
+  pipAdd: "Add picture-in-picture overlay",
   aspectTitle: "Aspect ratio",
   aspectMenuLabel: "Aspect ratio",
   aspectOriginal: "Original",
@@ -160,9 +154,7 @@ export const localeZh: Locale = {
   keyframeRemove: "删除当前关键帧",
   seekClipStart: "跳到片段起点 (I)",
   seekClipEnd: "跳到片段末尾 (O)",
-  pipEnable: "开启画中画",
-  pipDisable: "关闭画中画",
-  pipToggle: "画中画",
+  pipAdd: "添加画中画",
   aspectTitle: "比例",
   aspectMenuLabel: "画面比例",
   aspectOriginal: "原始",

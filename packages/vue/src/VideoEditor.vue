@@ -70,7 +70,7 @@ const props = defineProps<{
    * every video track's active clip with track `0` on top. Audio
    * policy: only top track unmuted; lower tracks mute.
    */
-  pictureInPicture?: { enabled?: boolean; toolbarToggle?: boolean };
+  pictureInPicture?: { enabled?: boolean; toolbarAdd?: boolean };
   /**
    * Built-in aspect-ratio picker (CapCut-style 比例 dropdown). Reactive
    * — set `{ enabled: true }` to surface the chip at the left of the
@@ -93,6 +93,7 @@ const emit = defineEmits<{
     target: { clipId: string; keyframeId: string } | null,
   ): void;
   (e: "aspectChange", aspect: AspectRatio | null): void;
+  (e: "pictureInPictureAddRequested"): void;
   (e: "error", error: Error): void;
 }>();
 
@@ -142,6 +143,9 @@ onMounted(() => {
       emit("keyframeSelectionChange", target),
     ),
     editor.on("aspectChange", ({ aspect }) => emit("aspectChange", aspect)),
+    editor.on("requestPictureInPictureAdd", () =>
+      emit("pictureInPictureAddRequested"),
+    ),
     editor.on("error", ({ error }) => emit("error", error)),
   );
 

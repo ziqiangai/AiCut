@@ -158,14 +158,23 @@ export interface EditorOptions {
    * via `PlaybackEngine.setPictureInPictureEnabled`. Other engines
    * fall back to single-clip.
    *
-   * `toolbarToggle: true` surfaces a built-in PiP icon button in the
-   * toolbar (next to the keyframe button) — clicking it flips
-   * `enabled` between true / false. Defaults to false so the chrome
-   * stays unchanged for hosts that wire their own PiP UI.
+   * `toolbarAdd: true` surfaces a built-in "+ PiP overlay" icon
+   * button in the toolbar (next to the keyframe button). Clicking
+   * it emits the `requestPictureInPictureAdd` event — the LIBRARY
+   * doesn't run an upload itself. Hosts wire this to their existing
+   * file-picker / upload pipeline and then create the new clip
+   * wherever makes sense for their data model. Defaults to false
+   * so the chrome stays unchanged for hosts that roll their own UI.
+   *
+   * `enabled` controls whether multi-track composition actually
+   * happens. It's intentionally orthogonal to the toolbar button:
+   * the toolbar is "add a PiP", the enable flag is "show the
+   * compositor". Hosts typically wire a sidebar checkbox or
+   * settings menu to it.
    */
   pictureInPicture?: {
     enabled?: boolean;
-    toolbarToggle?: boolean;
+    toolbarAdd?: boolean;
   };
 }
 
@@ -198,6 +207,14 @@ export interface EditorEventMap {
   /** Multi-track preview compositing toggle changed
    *  (Editor.setPictureInPictureEnabled). */
   pictureInPictureEnabledChange: { enabled: boolean };
+  /**
+   * User clicked the built-in "+ PiP overlay" toolbar button. Host
+   * is expected to surface its own file-picker / upload affordance
+   * and append the resulting clip somewhere appropriate (typically
+   * a new video track). The library doesn't ship an upload UI on
+   * purpose — different hosts have very different upload pipelines.
+   */
+  requestPictureInPictureAdd: void;
   /**
    * Aspect-ratio picker toggle changed (Editor.setAspectEnabled). Only
    * fires when the host-facing visibility flips — picking a new ratio
@@ -506,7 +523,7 @@ export class Editor implements EditorApi {
   private aspectEnabled: boolean;
   private previewFrameEnabled: boolean;
   private pictureInPictureEnabled: boolean;
-  private pictureInPictureToolbarEnabled: boolean;
+  private pictureInPictureToolbarAddEnabled: boolean;
   /** Drag-session bookkeeping for ripple-merge undo. See
    *  beginInteraction / endInteraction docs on EditorApi. */
   private interactionDepth = 0;
@@ -530,8 +547,8 @@ export class Editor implements EditorApi {
     // preview pass `previewFrame: { enabled: false }` to opt out.
     this.previewFrameEnabled = opts.previewFrame?.enabled !== false;
     this.pictureInPictureEnabled = opts.pictureInPicture?.enabled === true;
-    this.pictureInPictureToolbarEnabled =
-      opts.pictureInPicture?.toolbarToggle === true;
+    this.pictureInPictureToolbarAddEnabled =
+      opts.pictureInPicture?.toolbarAdd === true;
 
     // Must run before EditorUI builds the Timeline — those layout
     // values are read at canvas init time.
@@ -576,8 +593,8 @@ export class Editor implements EditorApi {
       onSeekClipStart: () => this.seekToSelectedClipEdge("start"),
       onSeekClipEnd: () => this.seekToSelectedClipEdge("end"),
       onAspectChange: (a) => this.setAspect(a),
-      onPictureInPictureToggle: () =>
-        this.setPictureInPictureEnabled(!this.pictureInPictureEnabled),
+      onPictureInPictureAdd: () =>
+        this.bus.emit("requestPictureInPictureAdd", undefined),
     });
 
     const engineFactory: PlaybackEngineFactory =
@@ -1250,9 +1267,9 @@ export class Editor implements EditorApi {
     return this.pictureInPictureEnabled;
   }
 
-  /** Whether the built-in PiP toolbar toggle is currently rendered. */
-  isPictureInPictureToolbarEnabled(): boolean {
-    return this.pictureInPictureToolbarEnabled;
+  /** Whether the built-in "+ PiP overlay" toolbar button is rendered. */
+  isPictureInPictureToolbarAddEnabled(): boolean {
+    return this.pictureInPictureToolbarAddEnabled;
   }
 
   setPictureInPictureEnabled(enabled: boolean): void {

@@ -30,8 +30,10 @@ export interface ToolbarCallbacks {
   /** User picked an output aspect from the built-in picker. `null`
    *  means "Original" (clear Project.aspect). */
   onAspectChange: (aspect: AspectRatio | null) => void;
-  /** Toggle multi-track picture-in-picture compositing. */
-  onPictureInPictureToggle: () => void;
+  /** "+ PiP overlay" toolbar button click — the editor fires
+   *  `requestPictureInPictureAdd` and lets the host's upload pipeline
+   *  take over. The library doesn't run an upload itself. */
+  onPictureInPictureAdd: () => void;
 }
 
 interface ToolbarState {
@@ -68,13 +70,10 @@ interface ToolbarState {
   aspectEnabled: boolean;
   /** Current output aspect — null = "Original" (no Project.aspect). */
   aspect: AspectRatio | null;
-  /** Host opt-in for the PiP toggle button. When off (default), the
-   *  button is hidden — same pattern as the keyframes / clipEdgeNav
-   *  cluster. */
-  pipToolbarEnabled: boolean;
-  /** Current PiP state — drives the icon (filled vs outlined) +
-   *  the tooltip. */
-  pictureInPictureEnabled: boolean;
+  /** Host opt-in for the "+ PiP overlay" toolbar button. When off
+   *  (default), the button is hidden — same pattern as the
+   *  keyframes / clipEdgeNav cluster. */
+  pipToolbarAddEnabled: boolean;
 }
 
 /**
@@ -174,11 +173,11 @@ export class Toolbar {
     this.seekClipEndBtn.style.display = "none"; // gated by render() on clipEdgeNavEnabled
     this.pipBtn = mkIconButton(
       "pipOutline",
-      locale.pipToggle,
-      () => cb.onPictureInPictureToggle(),
-      "aicut-pip",
+      locale.pipAdd,
+      () => cb.onPictureInPictureAdd(),
+      "aicut-pip-add",
     );
-    this.pipBtn.style.display = "none"; // gated by render() on pipToolbarEnabled
+    this.pipBtn.style.display = "none"; // gated by render() on pipToolbarAddEnabled
     // Order: trim handles, then [|◀ ◇ ▶|] — start, kf, end — so the
     // three nav buttons cluster around the keyframe affordance. PiP
     // toggle goes at the end of the cluster.
@@ -307,36 +306,13 @@ export class Toolbar {
     if (!this.lastState || this.lastState.aspect !== state.aspect) {
       this.aspectPicker.setValue(state.aspect);
     }
-    // PiP toggle — visibility gated on host opt-in; icon + tooltip
-    // + toggle-on style track the current state.
+    // PiP "+ overlay" button — visibility gated on host opt-in;
+    // single state, click emits requestPictureInPictureAdd.
     if (
       !this.lastState ||
-      this.lastState.pipToolbarEnabled !== state.pipToolbarEnabled
+      this.lastState.pipToolbarAddEnabled !== state.pipToolbarAddEnabled
     ) {
-      this.pipBtn.style.display = state.pipToolbarEnabled ? "" : "none";
-    }
-    if (state.pipToolbarEnabled) {
-      if (
-        !this.lastState ||
-        this.lastState.pictureInPictureEnabled !== state.pictureInPictureEnabled
-      ) {
-        this.pipBtn.innerHTML = state.pictureInPictureEnabled
-          ? ICONS.pipFilled
-          : ICONS.pipOutline;
-        const title = state.pictureInPictureEnabled
-          ? this.locale.pipDisable
-          : this.locale.pipEnable;
-        this.pipBtn.title = title;
-        this.pipBtn.setAttribute("aria-label", title);
-        this.pipBtn.classList.toggle(
-          "aicut-toggle-on",
-          state.pictureInPictureEnabled,
-        );
-        this.pipBtn.setAttribute(
-          "aria-pressed",
-          state.pictureInPictureEnabled ? "true" : "false",
-        );
-      }
+      this.pipBtn.style.display = state.pipToolbarAddEnabled ? "" : "none";
     }
     // Keyframe button — toggle visibility via display, swap icon to
     // reflect whether a kf exists at the playhead, swap tooltip.
@@ -418,12 +394,9 @@ export class Toolbar {
     applyTitle(this.zoomOutBtn, locale.zoomOut);
     applyTitle(this.zoomInBtn, locale.zoomIn);
     applyTitle(this.resetBtn, locale.reset);
-    // PiP button tooltip — picks enable/disable off lastState.
     if (this.pipBtn) {
-      const on = this.lastState?.pictureInPictureEnabled === true;
-      const title = on ? locale.pipDisable : locale.pipEnable;
-      this.pipBtn.title = title;
-      this.pipBtn.setAttribute("aria-label", title);
+      this.pipBtn.title = locale.pipAdd;
+      this.pipBtn.setAttribute("aria-label", locale.pipAdd);
     }
     // Keyframe button tooltip — picks add/remove off the lastState if
     // we have one, otherwise default to add.
