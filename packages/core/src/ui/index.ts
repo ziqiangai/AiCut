@@ -238,7 +238,13 @@ export class EditorUI {
       clipEdgeNavEnabled: this.editor.isClipEdgeNavEnabled(),
       aspectEnabled: this.editor.isAspectEnabled(),
       aspect: this.editor.getAspect(),
-      pipToolbarAddEnabled: this.editor.isPictureInPictureToolbarAddEnabled(),
+      // Gate the toolbar "+ PiP" button on the master enable flag.
+      // When PiP is disabled there's no point adding overlay clips
+      // (they wouldn't paint), so the button stays hidden — same
+      // semantics CapCut surfaces in its sidebar PiP toggle.
+      pipToolbarAddEnabled:
+        this.editor.isPictureInPictureToolbarAddEnabled() &&
+        this.editor.isPictureInPictureEnabled(),
       snap,
       pxPerSec,
       ...kfState,
@@ -279,7 +285,13 @@ export class EditorUI {
       clipEdgeNavEnabled: this.editor.isClipEdgeNavEnabled(),
       aspectEnabled: this.editor.isAspectEnabled(),
       aspect: this.editor.getAspect(),
-      pipToolbarAddEnabled: this.editor.isPictureInPictureToolbarAddEnabled(),
+      // Gate the toolbar "+ PiP" button on the master enable flag.
+      // When PiP is disabled there's no point adding overlay clips
+      // (they wouldn't paint), so the button stays hidden — same
+      // semantics CapCut surfaces in its sidebar PiP toggle.
+      pipToolbarAddEnabled:
+        this.editor.isPictureInPictureToolbarAddEnabled() &&
+        this.editor.isPictureInPictureEnabled(),
       snap: this.editor.getSnap(),
       pxPerSec: this.editor.getScale(),
       ...kfState,
