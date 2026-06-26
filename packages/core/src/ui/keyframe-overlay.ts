@@ -82,6 +82,13 @@ export class KeyframeOverlay {
          *  newCenter into pan offsets. */
         canvasCenterX: number;
         canvasCenterY: number;
+        /** Offset between the pointerdown position and the
+         *  handle's LOGICAL anchor point (corner / edge midpoint).
+         *  Subtracted from every subsequent cursor read so the clip
+         *  doesn't jump at the start of a drag when the user clicks
+         *  off-center inside the 18×6 / 6×18 handle hit zone. */
+        grabOffsetX: number;
+        grabOffsetY: number;
       }
     | null = null;
   private capturedPointerId: number | null = null;
@@ -281,6 +288,21 @@ export class KeyframeOverlay {
     this.capturedPointerId = e.pointerId;
     const axisX: 0 | 1 = touchesLeft || touchesRight ? 1 : 0;
     const axisY: 0 | 1 = touchesTop || touchesBottom ? 1 : 0;
+    // Where the handle's LOGICAL anchor point sits in viewport
+    // coords — the actual edge / corner position, not the click
+    // location. Used to compute the grab offset below.
+    const handleLogicalX = touchesLeft
+      ? hostRect.left + clipRect.x
+      : touchesRight
+        ? hostRect.left + clipRect.x + clipRect.w
+        : hostRect.left + clipRect.x + clipRect.w / 2;
+    const handleLogicalY = touchesTop
+      ? hostRect.top + clipRect.y
+      : touchesBottom
+        ? hostRect.top + clipRect.y + clipRect.h
+        : hostRect.top + clipRect.y + clipRect.h / 2;
+    const grabOffsetX = e.clientX - handleLogicalX;
+    const grabOffsetY = e.clientY - handleLogicalY;
     this.drag = {
       kind: "scale",
       clipId: ctx.clip.id,
@@ -294,6 +316,8 @@ export class KeyframeOverlay {
       baseH,
       canvasCenterX,
       canvasCenterY,
+      grabOffsetX,
+      grabOffsetY,
     };
     this.editor.beginInteraction();
     target.addEventListener("pointermove", this.onPointerMove);
@@ -330,8 +354,14 @@ export class KeyframeOverlay {
       // does when the cursor wanders slightly off-diagonal — the
       // opposite corner stays pinned to within float-rounding noise
       // instead of bouncing by a pixel each frame.
-      const offsetX = (e.clientX - this.drag.anchorX) * this.drag.dirX;
-      const offsetY = (e.clientY - this.drag.anchorY) * this.drag.dirY;
+      // Subtract the grab-offset so the math always treats the
+      // cursor as if it had clicked exactly on the handle's logical
+      // anchor point. Eliminates the 1-2px "jump" the user sees the
+      // moment they press on a wide edge handle slightly off-center.
+      const cursorX = e.clientX - this.drag.grabOffsetX;
+      const cursorY = e.clientY - this.drag.grabOffsetY;
+      const offsetX = (cursorX - this.drag.anchorX) * this.drag.dirX;
+      const offsetY = (cursorY - this.drag.anchorY) * this.drag.dirY;
       // Mask out axes the handle isn't supposed to consume (edge
       // handles only listen to the perpendicular axis). For corners
       // axisX = axisY = 1, so this is a no-op.
