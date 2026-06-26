@@ -203,7 +203,14 @@ function FramePicker() {
  * Confirm calls back into the parent which triggers `api.requestExport`
  * after stashing the latest output settings.
  */
-type ExportAspectKey = "16:9" | "9:16" | "1:1" | "4:3";
+type ExportAspectKey =
+  | "16:9"
+  | "9:16"
+  | "1:1"
+  | "4:3"
+  | "3:4"
+  | "4:5"
+  | "21:9";
 function ExportPopover(props: {
   aspect: ExportAspectKey;
   resIdx: number;
@@ -265,7 +272,7 @@ function ExportPopover(props: {
       }}
     >
       <div style={{ fontWeight: 600, fontSize: 13 }}>Export settings</div>
-      <Row label="比例">
+      <Row label="Aspect">
         <PopoverSelect
           testId="demo-export-aspect"
           value={props.aspect}
@@ -275,7 +282,7 @@ function ExportPopover(props: {
           onChange={(v) => props.onChangeAspect(v)}
         />
       </Row>
-      <Row label="分辨率">
+      <Row label="Resolution">
         <PopoverSelect
           testId="demo-export-resolution"
           value={props.resIdx}
@@ -283,7 +290,7 @@ function ExportPopover(props: {
           onChange={(v) => props.onChangeResIdx(v)}
         />
       </Row>
-      <Row label="帧率">
+      <Row label="Frame rate">
         <PopoverSelect
           testId="demo-export-fps"
           value={props.fps}
@@ -722,7 +729,14 @@ export function App() {
   // dimensions. The keyframe-compilation branch on the backend is
   // ALSO gated on width+height, so silently exporting at "no dims"
   // would skip animation entirely — bug we just fixed.
-  type ExportAspect = "16:9" | "9:16" | "1:1" | "4:3";
+  type ExportAspect =
+    | "16:9"
+    | "9:16"
+    | "1:1"
+    | "4:3"
+    | "3:4"
+    | "4:5"
+    | "21:9";
   const RESOLUTIONS: Record<
     ExportAspect,
     Array<{ label: string; width: number; height: number }>
@@ -748,6 +762,26 @@ export function App() {
       { label: "480p (640×480)", width: 640, height: 480 },
       { label: "720p (1024×768)", width: 1024, height: 768 },
       { label: "1080p (1440×1080)", width: 1440, height: 1080 },
+    ],
+    "3:4": [
+      { label: "480×640", width: 480, height: 640 },
+      { label: "768×1024", width: 768, height: 1024 },
+      { label: "1080×1440", width: 1080, height: 1440 },
+    ],
+    // Instagram portrait — width-major even though it's taller; the
+    // 1080×1350 entry is what Instagram itself recommends.
+    "4:5": [
+      { label: "640×800", width: 640, height: 800 },
+      { label: "864×1080", width: 864, height: 1080 },
+      { label: "1080×1350", width: 1080, height: 1350 },
+    ],
+    // Cinematic / ultrawide — 21:9 is an industry shorthand for
+    // 64:27 (the actual integer ratio that maps to common encoder
+    // dims). All entries below are exact multiples of 64×27.
+    "21:9": [
+      { label: "720p (1680×720)", width: 1680, height: 720 },
+      { label: "1080p (2560×1080)", width: 2560, height: 1080 },
+      { label: "1440p (3440×1440)", width: 3440, height: 1440 },
     ],
   };
   const FPS_OPTIONS = [24, 30, 60];
@@ -1027,14 +1061,12 @@ export function App() {
           onAspectChange={(a) => {
             // Built-in picker drives the demo's export aspect default
             // — pickers in real hosts wire to whatever output settings
-            // they own (preview letterbox, ffmpeg dims, etc.).
+            // they own (preview letterbox, ffmpeg dims, etc.). Every
+            // ratio the editor surfaces has a matching RESOLUTIONS
+            // entry below, so the cast is safe.
             if (a == null) return; // "Original" keeps the current export aspect
-            if (a === "16:9" || a === "9:16" || a === "1:1" || a === "4:3") {
-              setExportAspect(a);
-              setExportResIdx((i) =>
-                Math.min(i, RESOLUTIONS[a].length - 1),
-              );
-            }
+            setExportAspect(a as ExportAspect);
+            setExportResIdx((i) => Math.min(i, RESOLUTIONS[a].length - 1));
           }}
           style={{ height: "100%" }}
           headerLeft={
