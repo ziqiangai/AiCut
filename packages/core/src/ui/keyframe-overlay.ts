@@ -25,6 +25,17 @@ export class KeyframeOverlay {
   private editor: Editor;
   private host: HTMLElement;
   readonly root: HTMLDivElement;
+  /**
+   * Static canvas-extent guide pinned to the OUTPUT rect. Shows the
+   * editable area regardless of selection — same affordance the
+   * dashed border had before PiP. Visibility gated on
+   * `previewFrame.enabled`. Always purely visual: pointer-events
+   * pass through so clicks land on whatever lives below.
+   */
+  private canvasGuide: HTMLDivElement;
+  /** Selection-following frame pinned to the SELECTED clip's content
+   *  rect. Doubles as the drag-to-pan hit target when keyframes mode
+   *  is on; corner handles attach to its bounds. */
   private frameBody: HTMLDivElement;
   private handles: Record<"tl" | "tr" | "bl" | "br", HTMLDivElement>;
   private rafHandle: number | null = null;
@@ -61,6 +72,11 @@ export class KeyframeOverlay {
     this.root.className = "aicut-keyframe-overlay";
     this.root.setAttribute("data-testid", "aicut-keyframe-overlay");
     this.root.style.display = "none";
+
+    this.canvasGuide = document.createElement("div");
+    this.canvasGuide.className = "aicut-keyframe-overlay__canvas-guide";
+    this.canvasGuide.setAttribute("data-testid", "aicut-keyframe-canvas-guide");
+    this.root.appendChild(this.canvasGuide);
 
     this.frameBody = document.createElement("div");
     this.frameBody.className = "aicut-keyframe-overlay__frame";
@@ -349,15 +365,27 @@ export class KeyframeOverlay {
       "aicut-keyframe-overlay--interactive",
       interactive,
     );
-    this.frameBody.style.display = frameVisible ? "block" : "none";
-    // Frame body pins to the SELECTED clip's content rect — not the
-    // canvas. For a normal full-frame clip those rects coincide
-    // (content covers the canvas), so the visual is unchanged. For a
-    // PiP overlay (content smaller than canvas) the dashed border
-    // now wraps the actual clip the user selected, instead of
-    // floating around the entire canvas while the four corner
-    // handles cluster in the middle with nothing connecting them.
+    // Canvas guide — dashed outline of the output canvas. Same
+    // affordance the dashed border had before PiP existed. Gated on
+    // `previewFrame.enabled` regardless of selection.
+    this.canvasGuide.style.display = frameVisible ? "block" : "none";
+    Object.assign(this.canvasGuide.style, {
+      left: `${outRect.x}px`,
+      top: `${outRect.y}px`,
+      width: `${outRect.w}px`,
+      height: `${outRect.h}px`,
+    });
+
+    // Selection-following frame body — wraps the SELECTED clip's
+    // content rect so a PiP overlay (content < canvas) gets a clear
+    // outline + handles around the actual clip, while a normal full-
+    // frame clip behaves identically to before (content == canvas).
+    // Visibility ties to whether there's anything to select: with no
+    // active clip the body collapses out of the way and only the
+    // canvas guide remains.
+    const hasSelection = this.editor.getSelection() != null;
     const frameRect = contentRect ?? outRect;
+    this.frameBody.style.display = hasSelection ? "block" : "none";
     Object.assign(this.frameBody.style, {
       left: `${frameRect.x}px`,
       top: `${frameRect.y}px`,

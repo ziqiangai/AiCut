@@ -398,13 +398,24 @@
   z-index: 3;
 }
 
+.aicut-keyframe-overlay__canvas-guide {
+  position: absolute;
+  border: 1.5px dashed
+    color-mix(in srgb, var(--color-brand, #9a31f4) 65%, transparent);
+  background: transparent;
+  /* Always passive — the canvas guide is purely informational. The
+     selection frame below is what captures pan / scale drags. */
+  pointer-events: none;
+  cursor: default;
+  box-sizing: border-box;
+}
+
 .aicut-keyframe-overlay__frame {
   position: absolute;
   border: 1.5px dashed var(--color-brand, #9a31f4);
   background: transparent;
-  /* Passive by default — frame is a pure outline that visualises the
-     output canvas. Without --interactive, clicks fall through to the
-     preview so the user can still interact with whatever lives below. */
+  /* Passive by default — selecting a clip outlines it but doesn't
+     necessarily mean "drag-to-edit". Keyframes mode flips this on. */
   pointer-events: none;
   cursor: default;
   box-sizing: border-box;
