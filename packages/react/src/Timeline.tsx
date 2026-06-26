@@ -14,6 +14,7 @@ import {
   type Locale,
   type Ms,
   type Project,
+  type Theme,
   type TimelineOptions,
 } from "@aicut/core";
 
@@ -29,6 +30,7 @@ export interface TimelineApi {
   getSelection(): string | null;
   setSnap(snap: boolean): void;
   fitToWindow(): void;
+  setTheme(theme: Theme): void;
   getDebugInfo(): ReturnType<CoreTimeline["getDebugInfo"]>;
 }
 
@@ -52,6 +54,9 @@ export interface TimelineProps {
   autoFit?: boolean;
   /** UI string overrides (English default). */
   locale?: Partial<Locale>;
+  /** Theme tokens. Reactive — flipping the object calls
+   *  `timeline.setTheme(theme)` underneath. */
+  theme?: Theme;
   /**
    * Render a 36px top toolbar strip with empty left/right flex slots
    * for host-supplied controls. Default false. Pair with `toolbarLeft`
@@ -122,6 +127,7 @@ export function Timeline(props: TimelineProps) {
       snap: cbRef.current.snap,
       autoFit: cbRef.current.autoFit,
       locale: cbRef.current.locale,
+      theme: cbRef.current.theme,
       toolbar: cbRef.current.toolbar,
       onSeek: (t) => cbRef.current.onSeek?.(t),
       onSelectClip: (id) => cbRef.current.onSelectClip?.(id),
@@ -145,6 +151,9 @@ export function Timeline(props: TimelineProps) {
   useEffect(() => {
     if (props.locale) tlRef.current?.setLocale(props.locale);
   }, [props.locale]);
+  useEffect(() => {
+    if (props.theme) tlRef.current?.setTheme(props.theme);
+  }, [props.theme]);
 
   useImperativeHandle<TimelineApi | null, TimelineApi | null>(
     props.apiRef,
@@ -162,6 +171,7 @@ export function Timeline(props: TimelineProps) {
         getSelection: () => tl.getSelection(),
         setSnap: (s) => tl.setSnap(s),
         fitToWindow: () => tl.fitToWindow(),
+        setTheme: (t) => tl.setTheme(t),
         getDebugInfo: () => tl.getDebugInfo(),
       };
     },

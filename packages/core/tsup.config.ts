@@ -12,6 +12,7 @@ export default defineConfig({
   entry: [
     "src/index.ts",
     "src/lighting/index.ts",
+    "src/lighting-v3/index.ts",
     "src/playback/webcodecs/index.ts",
   ],
   format: ["esm", "cjs"],

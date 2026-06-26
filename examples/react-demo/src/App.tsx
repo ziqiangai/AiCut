@@ -27,6 +27,8 @@ import {
   WebCodecsEngine,
   isWebCodecsSupported,
 } from "@aicut/react/webcodecs";
+import { useToast } from "./Toast.js";
+import { UploadPanel, type UploadResult } from "./UploadPanel.js";
 
 /**
  * Two reference themes the demo cycles through. The library itself
@@ -81,14 +83,14 @@ const SRC_B = {
 };
 
 function seed(): Project {
+  // No preset sources — users upload their own from the sidebar.
+  // Two empty video tracks so multi-track layout is visible from
+  // first paint; uploads land on the first empty one by default.
   return {
     version: 1,
-    sources: [SRC_A, SRC_B],
+    sources: [],
     tracks: [
       { id: createId("track"), kind: "video", clips: [] },
-      // A second empty video track to demonstrate multi-track layout.
-      // The host can drop clips into it via apiRef.moveClip(...) or
-      // duplicate the seed logic.
       { id: createId("track"), kind: "video", clips: [] },
     ],
   };
@@ -640,13 +642,35 @@ function ExportStatusPill({ status }: { status: ExportStatus }) {
   return null;
 }
 
+/**
+ * Backend URLs come from Vite env vars at build time. Empty string =
+ * not configured. When the user picks a backend with an empty URL,
+ * clicking export shows a toast hint instead of firing a request.
+ *
+ *   VITE_BACKEND_TS_URL   — TypeScript exporter
+ *   VITE_BACKEND_GO_URL   — Go exporter
+ *
+ * Default for `pnpm dev` (no env file) is the local 8787 / 8788 so
+ * the historical "just start the backends and click export" flow
+ * keeps working. The GitHub Pages build sets both to empty, which is
+ * intentional — the hosted demo can't talk to your localhost.
+ */
+const ENV_BACKEND_TS = (import.meta.env.VITE_BACKEND_TS_URL as string | undefined) ?? "http://127.0.0.1:8787";
+const ENV_BACKEND_GO = (import.meta.env.VITE_BACKEND_GO_URL as string | undefined) ?? "http://127.0.0.1:8788";
+
 const BACKENDS = {
-  ts: { label: "TypeScript (8787)", url: "http://127.0.0.1:8787" },
-  go: { label: "Go (8788)", url: "http://127.0.0.1:8788" },
+  ts: { label: "TypeScript", url: ENV_BACKEND_TS },
+  go: { label: "Go", url: ENV_BACKEND_GO },
 } as const;
+
+/** POST endpoint that accepts a multipart upload and returns
+ *  `{ url }`. Null = no server upload, fall back to blob URLs. */
+const UPLOAD_ENDPOINT =
+  (import.meta.env.VITE_UPLOAD_ENDPOINT as string | undefined) || null;
 
 export function App() {
   const apiRef = useRef<VideoEditorApi | null>(null);
+  const toast = useToast();
   const [savedJson, setSavedJson] = useState("");
   const [exportJson, setExportJson] = useState("");
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
@@ -760,6 +784,22 @@ export function App() {
     const ac = new AbortController();
     exportAbortRef.current = ac;
     const baseUrl = BACKENDS[backendKindRef.current].url;
+    if (!baseUrl) {
+      toast.push(
+        `导出失败：未配置 ${backendKindRef.current.toUpperCase()} 后端地址。请在 .env.local 中设置 VITE_BACKEND_${backendKindRef.current.toUpperCase()}_URL 后重新构建。`,
+        { variant: "warn", duration: 6000 },
+      );
+      setExportStatus({ running: false });
+      return;
+    }
+    // Blob URLs only live in the browser tab — ffmpeg can't fetch
+    // them. If any source URL is a blob:, warn the user up front.
+    if (project.sources.some((s) => s.url.startsWith("blob:"))) {
+      toast.push(
+        "导出可能失败：部分视频源是浏览器本地 blob URL，后端无法访问。请配置 VITE_UPLOAD_ENDPOINT 上传到可访问的位置后重新拖入。",
+        { variant: "warn", duration: 6000 },
+      );
+    }
     setExportStatus({ running: true, overall: 0, phase: "encode" });
     // Resolve dev-server-relative URLs (e.g. "/a.mov") into absolute
     // http URLs the backend's ffmpeg can fetch. Demo seeds use Vite's
@@ -855,6 +895,65 @@ export function App() {
 
   const cancelExport = (): void => {
     exportAbortRef.current?.abort();
+  };
+
+  /**
+   * Handler the UploadPanel calls after a video resolves to a URL
+   * (either a server-uploaded http URL or a local blob URL). Adds the
+   * source AND drops a clip onto the first video track, appended to
+   * whatever's already there. The editor's history records this as
+   * one normal mutation so the user can Cmd+Z to undo.
+   */
+  const handleUploaded = (r: UploadResult): void => {
+    const api = apiRef.current;
+    if (!api) {
+      toast.push("编辑器未就绪，请稍后再试", { variant: "warn" });
+      return;
+    }
+    const project = api.getProject();
+    const sourceId = createId("src");
+    const trackIdx = project.tracks.findIndex((t) => t.kind === "video");
+    if (trackIdx < 0) {
+      toast.push("没有可用的视频轨道", { variant: "warn" });
+      return;
+    }
+    const track = project.tracks[trackIdx]!;
+    const tail = track.clips.reduce(
+      (acc, c) => Math.max(acc, c.start + (c.out - c.in)),
+      0,
+    );
+    const durationMs = r.durationMs ?? 5000;
+    const next: Project = {
+      ...project,
+      sources: [
+        ...project.sources,
+        {
+          id: sourceId,
+          url: r.url,
+          kind: "video",
+          name: r.name,
+          duration: r.durationMs,
+        },
+      ],
+      tracks: project.tracks.map((t, i) =>
+        i === trackIdx
+          ? {
+              ...t,
+              clips: [
+                ...t.clips,
+                {
+                  id: createId("clip"),
+                  sourceId,
+                  in: 0,
+                  out: durationMs,
+                  start: tail,
+                },
+              ],
+            }
+          : t,
+      ),
+    };
+    api.setProject(next);
   };
 
   // Note: `onReady` is the right hook to expose the API to e2e via
@@ -1043,6 +1142,14 @@ export function App() {
         />
       </div>
       <aside className="demo-sidebar">
+        <h2>Upload video</h2>
+        <div className="demo-row">
+          <UploadPanel
+            uploadEndpoint={UPLOAD_ENDPOINT}
+            onUploaded={handleUploaded}
+          />
+        </div>
+
         <h2>Theme</h2>
         <div className="demo-row">
           <button

@@ -1,6 +1,6 @@
 {
   "name": "@aicut/react",
-  "version": "0.6.0",
+  "version": "0.7.1",
   "description": "React wrapper for the AiCut video editor + lighting picker — thin declarative shells over @aicut/core.",
   "license": "MIT",
   "author": "ziqiang <ziqiangytu@gmail.com>",
@@ -52,6 +52,11 @@
       "types": "./dist/lighting.d.ts",
       "import": "./dist/lighting.js",
       "require": "./dist/lighting.cjs"
+    },
+    "./lighting-v3": {
+      "types": "./dist/lighting-v3.d.ts",
+      "import": "./dist/lighting-v3.js",
+      "require": "./dist/lighting-v3.cjs"
     },
     "./webcodecs": {
       "types": "./dist/webcodecs.d.ts",

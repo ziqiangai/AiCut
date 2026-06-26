@@ -1,4 +1,6 @@
 import { type Locale, mergeLocale } from "../i18n.js";
+import { applyTheme } from "../theme.js";
+import type { Theme } from "../types.js";
 import {
   bigFrameStepMs,
   frameStepMs,
@@ -59,6 +61,12 @@ export interface TimelineOptions {
   autoFit?: boolean;
   /** UI string overrides (English defaults). Use `localeZh` for Chinese. */
   locale?: Partial<Locale>;
+  /**
+   * Theme tokens — applied as `--aicut-*` CSS variables on the host
+   * container. Same shape as the video Editor's `theme` option, so a
+   * host can pass the SAME object to both an Editor and a standalone
+   * Timeline. Reactive via `setTheme(...)`. */
+  theme?: Theme;
   /**
    * Render an empty 36px toolbar strip at the top of the host element
    * with `toolbarLeft` / `toolbarRight` flex slots. The library paints
@@ -270,6 +278,7 @@ export class Timeline {
     this.root.classList.add("aicut-timeline-canvas");
     this.root.innerHTML = "";
     this.root.style.position = this.root.style.position || "relative";
+    applyTheme(this.root, opts.theme);
 
     // Toolbar strip — opt-in. When enabled the root becomes a flex
     // column so the toolbar reserves vertical space and the canvas
@@ -405,6 +414,12 @@ export class Timeline {
   setLocale(locale: Partial<Locale>): void {
     this.locale = mergeLocale(locale);
     this.scheduleRender();
+  }
+
+  /** Swap the theme tokens at runtime. Same Theme shape as the video
+   *  Editor's `setTheme`. */
+  setTheme(theme: Theme): void {
+    applyTheme(this.root, theme);
   }
 
   /** Fit the project's full duration into the current viewport width. */

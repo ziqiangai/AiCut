@@ -1,6 +1,6 @@
 {
   "name": "@aicut/core",
-  "version": "0.6.0",
+  "version": "0.7.1",
   "description": "Framework-agnostic core for the AiCut video editor — canvas timeline, data model, pluggable PlaybackEngine (HTML5 / Canvas / WebCodecs), plus opt-in 3D lighting picker.",
   "license": "MIT",
   "author": "ziqiang <ziqiangytu@gmail.com>",
@@ -57,12 +57,18 @@
       "import": "./dist/lighting/index.js",
       "require": "./dist/lighting/index.cjs"
     },
+    "./lighting-v3": {
+      "types": "./dist/lighting-v3/index.d.ts",
+      "import": "./dist/lighting-v3/index.js",
+      "require": "./dist/lighting-v3/index.cjs"
+    },
     "./webcodecs": {
       "types": "./dist/playback/webcodecs/index.d.ts",
       "import": "./dist/playback/webcodecs/index.js",
       "require": "./dist/playback/webcodecs/index.cjs"
     },
-    "./styles.css": "./styles/theme.css"
+    "./styles.css": "./styles/theme.css",
+    "./lighting-v3.css": "./styles/lighting-v3.css"
   },
   "files": [
     "dist",

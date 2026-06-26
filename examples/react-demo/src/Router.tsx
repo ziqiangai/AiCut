@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { App } from "./App.js";
 import { LightingDemo } from "./LightingDemo.js";
+import { LightingV3Demo } from "./LightingV3Demo.js";
 
 /**
  * Tiny hash-based router — keeps the demo dep-free. Two routes:
@@ -36,14 +37,20 @@ const TABS: TabSpec[] = [
   },
   {
     href: "#/lighting",
-    label: "Lighting picker",
-    isActive: (h) => h.startsWith("#/lighting"),
+    label: "Lighting v2",
+    isActive: (h) => h === "#/lighting",
+  },
+  {
+    href: "#/lighting-v3",
+    label: "Lighting v3 ★",
+    isActive: (h) => h.startsWith("#/lighting-v3"),
   },
 ];
 
 export function Router() {
   const hash = useHash();
-  const onLighting = hash.startsWith("#/lighting");
+  const onLightingV3 = hash.startsWith("#/lighting-v3");
+  const onLightingV2 = hash === "#/lighting";
 
   return (
     <div className="demo-root">
@@ -65,7 +72,13 @@ export function Router() {
         </div>
       </nav>
       <div className="demo-page">
-        {onLighting ? <LightingDemo /> : <App />}
+        {onLightingV3 ? (
+          <LightingV3Demo />
+        ) : onLightingV2 ? (
+          <LightingDemo />
+        ) : (
+          <App />
+        )}
       </div>
     </div>
   );

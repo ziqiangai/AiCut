@@ -1,5 +1,6 @@
 import {
   AdditiveBlending,
+  CanvasTexture,
   Color,
   ConeGeometry,
   EdgesGeometry,
@@ -13,6 +14,7 @@ import {
   Quaternion,
   Raycaster,
   Scene,
+  ShaderMaterial,
   SphereGeometry,
   Texture,
   TextureLoader,
@@ -60,7 +62,15 @@ export class LightingScene {
    * change because the rotation depends on the direction vector.
    */
   private beamMesh: Mesh;
-  private beamMat: MeshBasicMaterial;
+  /** V2 uses MeshBasicMaterial with additive blending; V3 uses a
+   *  ShaderMaterial so the beam gradient (per-vertex alpha) and
+   *  color (uniform) can be controlled independently. */
+  private beamMat: MeshBasicMaterial | ShaderMaterial;
+  /** True when v3-style solid beam is active. Controls the
+   *  opacity-on-brightness formula in updateBeam (gradient texture
+   *  already does most of the fade, so we don't want the formula to
+   *  fight it). */
+  private solidBeamMode = false;
   /** Current normalized light direction — cached so brightness changes
    *  can rebuild the beam without re-deriving the geometry. */
   private lightDir = new Vector3(0, 0, 1);
@@ -82,7 +92,21 @@ export class LightingScene {
   onLightDrag: ((dir: { x: number; y: number; z: number }) => void) | null =
     null;
 
-  constructor(container: HTMLElement, view: LightingView) {
+  constructor(
+    container: HTMLElement,
+    view: LightingView,
+    opts?: {
+      /** Hide the wireframe sphere so a CSS-rendered "soap bubble"
+       *  background can show through unimpeded. The invisible raycast
+       *  sphere remains, so light-direction picking still works.
+       *  Default false (v2 behaviour, visible wire). */
+      hideWire?: boolean;
+      /** Use a non-additive, more visibly tinted beam — bumps opacity
+       *  so color-temperature changes actually read. Default false
+       *  (v2 keeps the soft additive glow). */
+      solidBeam?: boolean;
+    },
+  ) {
     this.viewMode = view;
     this.renderer = new WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(window.devicePixelRatio || 1);
@@ -106,15 +130,17 @@ export class LightingScene {
     );
     this.scene.add(this.sphereMesh);
 
-    const wire = new LineSegments(
-      new EdgesGeometry(new SphereGeometry(SPHERE_RADIUS, 16, 12)),
-      new LineBasicMaterial({
-        color: 0xcccccc,
-        transparent: true,
-        opacity: 0.55,
-      }),
-    );
-    this.scene.add(wire);
+    if (!opts?.hideWire) {
+      const wire = new LineSegments(
+        new EdgesGeometry(new SphereGeometry(SPHERE_RADIUS, 16, 12)),
+        new LineBasicMaterial({
+          color: 0xcccccc,
+          transparent: true,
+          opacity: 0.55,
+        }),
+      );
+      this.scene.add(wire);
+    }
 
     // Subject plane — square base, per-image aspect handled via scale.
     this.subjectMat = new MeshBasicMaterial({
@@ -137,13 +163,54 @@ export class LightingScene {
     // Cone beam (rebuilt on each direction/brightness change). Initial
     // material with sane defaults — apex/length/orient applied in
     // updateBeam() on first setLightDirection.
-    this.beamMat = new MeshBasicMaterial({
-      color: new Color(0xffffff),
-      transparent: true,
-      opacity: 0.35,
-      depthWrite: false,
-      blending: AdditiveBlending,
-    });
+    // V3 uses a ShaderMaterial — vertex shader emits a 1→0 alpha
+    // gradient along the cone's local Y (apex=1 at the light end,
+    // base=0 at the subject end); fragment shader uses a color
+    // uniform multiplied by a brightness-clamping factor so the
+    // beam stays visible against the light sphere background AND
+    // tints faithfully with the light color (color-temperature
+    // slider). MeshBasicMaterial's per-fragment alpha can't be
+    // driven by a uniform separately from color, hence the shader.
+    // V2 keeps the additive soft-glow path for back-compat.
+    if (opts?.solidBeam) {
+      this.solidBeamMode = true;
+      this.beamMat = new ShaderMaterial({
+        uniforms: {
+          uColor: { value: new Color(0xffffff) },
+          uOpacity: { value: 0.85 },
+        },
+        vertexShader: `
+          varying float vAlpha;
+          void main() {
+            // Cone local Y: -0.5 at base, +0.5 at apex.
+            vAlpha = position.y + 0.5;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 uColor;
+          uniform float uOpacity;
+          varying float vAlpha;
+          void main() {
+            // Clamp brightness so the beam reads on white bg even
+            // when uColor is pure white. The 0.55 mix toward black
+            // is the "darkening" — keeps the hue but cuts luminance.
+            vec3 col = mix(uColor, vec3(0.0), 0.55);
+            gl_FragColor = vec4(col, vAlpha * uOpacity);
+          }
+        `,
+        transparent: true,
+        depthWrite: false,
+      });
+    } else {
+      this.beamMat = new MeshBasicMaterial({
+        color: new Color(0xffffff),
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+        blending: AdditiveBlending,
+      });
+    }
     this.beamMesh = new Mesh(new ConeGeometry(BEAM_RADIUS, 1, 24, 1, true), this.beamMat);
     this.scene.add(this.beamMesh);
 
@@ -217,15 +284,43 @@ export class LightingScene {
     this.requestRender();
   }
 
-  /** Light color — drives the beam tint AND, eventually, the dot. */
+  /**
+   * Light color — drives the beam tint. The v3 beam now uses a
+   * ShaderMaterial that takes color via a uniform and applies a
+   * brightness-clamping multiplier in the fragment shader so the
+   * beam stays visible against the light sphere background even at
+   * bright source colors. Dot color stays static (dark) so it always
+   * reads as the light SOURCE marker; the visible color feedback
+   * lives on the BEAM itself, matching the user's design intent.
+   */
   setLightColor(hex: string): void {
     try {
-      this.beamMat.color = new Color(hex);
-      this.beamMat.needsUpdate = true;
+      const c = new Color(hex);
+      if (this.beamMat instanceof ShaderMaterial) {
+        (this.beamMat.uniforms.uColor.value as Color).copy(c);
+      } else {
+        this.beamMat.color = c;
+        this.beamMat.needsUpdate = true;
+      }
       this.requestRender();
     } catch {
       // invalid hex — leave the previous color
     }
+  }
+
+  /**
+   * Spin the subject plane in-place around the +Z axis. Degrees in,
+   * radians stored. Pure visual — does NOT touch the scale fit math
+   * applied in setSubjectImage, so the image stays correctly aspect-
+   * fit at any rotation.
+   *
+   * Added in v3 so the new lighting picker layout can offer a
+   * "rotate the image inside the sphere" knob; v2 never calls this
+   * (subjectMesh.rotation.z defaults to 0 and stays put).
+   */
+  setSubjectRotation(degrees: number): void {
+    this.subjectMesh.rotation.z = (degrees * Math.PI) / 180;
+    this.requestRender();
   }
 
   setSubjectImage(url: string | null): void {
@@ -293,8 +388,18 @@ export class LightingScene {
     this.beamMesh.position.copy(
       this.lightDir.clone().multiplyScalar(SPHERE_RADIUS - len / 2),
     );
-    // Fade the beam slightly with brightness so very dim looks dim.
-    this.beamMat.opacity = 0.18 + 0.32 * this.brightness;
+    // Fade the beam with brightness. With the gradient texture (v3)
+    // the shape of the fade is already baked in, so we only need a
+    // gentle overall multiplier — clamp higher to keep saturation.
+    // Additive mode (v2) gets the original softer formula.
+    // Brightness multiplier. V3 (ShaderMaterial) gets a higher base
+    // so even dim values stay visible against white bg; V2 uses the
+    // softer additive formula.
+    if (this.beamMat instanceof ShaderMaterial) {
+      this.beamMat.uniforms.uOpacity.value = 0.6 + 0.4 * this.brightness;
+    } else {
+      this.beamMat.opacity = 0.18 + 0.32 * this.brightness;
+    }
   }
 
   destroy(): void {
@@ -309,6 +414,12 @@ export class LightingScene {
     this.dotMesh.geometry.dispose();
     (this.dotMesh.material as MeshBasicMaterial).dispose();
     this.beamMesh.geometry.dispose();
+    // ShaderMaterial has no `.map` field; MeshBasicMaterial might
+    // (the additive-glow v2 beam doesn't use one but earlier
+    // texture-based attempts did, so we still guard).
+    if (this.beamMat instanceof MeshBasicMaterial) {
+      this.beamMat.map?.dispose();
+    }
     this.beamMat.dispose();
     this.renderer.domElement.remove();
   }
@@ -408,4 +519,39 @@ export class LightingScene {
       this.renderer.render(this.scene, this.activeCam);
     });
   }
+}
+
+/**
+ * 1×256 canvas texture used as the V3 solid beam's alpha gradient.
+ * White opaque at the top (UV v=0 = cone apex = light end) fading to
+ * white transparent at the bottom (v=1 = cone base = subject end).
+ * The material's color multiplies in the light tint, so the gradient
+ * is monochrome — color comes from `material.color`.
+ *
+ * Built once per scene in the constructor and disposed in destroy().
+ * Cost is trivial (~256 bytes of GPU memory).
+ */
+function buildBeamGradientTexture(): CanvasTexture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d")!;
+  const grad = ctx.createLinearGradient(0, 0, 0, 256);
+  // BLACK gradient — matches the Figma export's
+  // `paint1_linear_17045_35565` exactly: `<stop/>` (black, opacity 1)
+  // → offset 0.51 opacity 0.1875 → offset 1 opacity 0. Times the
+  // path's fill-opacity 0.5 = the (0.5, 0.094, 0) curve below.
+  //
+  // Using black (not white) is what makes the beam READ on the
+  // light-colored sphere bg — a white beam on a white scene is
+  // invisible. The trade-off is that material.color × texelColor.rgb
+  // can't tint a black texel, so color-temperature changes won't
+  // visibly retint the beam; with white sphere backgrounds the
+  // visibility win is worth it.
+  grad.addColorStop(0.0, "rgba(0, 0, 0, 0.5)");
+  grad.addColorStop(0.51, "rgba(0, 0, 0, 0.094)");
+  grad.addColorStop(1.0, "rgba(0, 0, 0, 0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 1, 256);
+  return new CanvasTexture(canvas);
 }

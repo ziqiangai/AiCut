@@ -1,0 +1,80 @@
+# Deploy the React demo to GitHub Pages on every push to main.
+# Inputs are env vars: see `examples/react-demo/.env.example`.
+#
+# Pages config (one-time, in the GitHub repo settings):
+#   Settings → Pages → Source: GitHub Actions
+# After that this workflow takes over.
+
+name: Deploy demo to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deploy; queue subsequent ones without cancelling
+# in-flight runs (lossy cancellation can leave Pages serving a half-
+# replaced bundle).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # Build the workspace packages first so the demo's
+      # `@aicut/core` / `@aicut/react` imports resolve to fresh dist.
+      - name: Build workspace packages
+        run: pnpm -r --filter "@aicut/core" --filter "@aicut/react" --filter "@aicut/vue" build
+
+      - name: Build demo
+        env:
+          # The repo path on Pages — `https://<user>.github.io/<repo>/`.
+          # Vite needs this set so asset URLs include the prefix.
+          VITE_BASE_PATH: /${{ github.event.repository.name }}/
+          # Optional — set these as repository secrets (Settings →
+          # Secrets and variables → Actions) to make the hosted demo
+          # talk to your real backends.
+          VITE_BACKEND_TS_URL: ${{ secrets.VITE_BACKEND_TS_URL }}
+          VITE_BACKEND_GO_URL: ${{ secrets.VITE_BACKEND_GO_URL }}
+          VITE_UPLOAD_ENDPOINT: ${{ secrets.VITE_UPLOAD_ENDPOINT }}
+        run: pnpm --filter "@aicut/react-demo" build
+
+      - name: Add SPA fallback for hash router
+        # The Router uses hash routes (#/lighting-v3 etc.), but Pages
+        # still 404s on the deep path before JS loads. Copy index.html
+        # as 404.html so any deep URL falls back to the SPA shell.
+        run: cp examples/react-demo/dist/index.html examples/react-demo/dist/404.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: examples/react-demo/dist
+
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

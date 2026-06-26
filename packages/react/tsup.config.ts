@@ -1,7 +1,12 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts", "src/lighting.ts", "src/webcodecs.ts"],
+  entry: [
+    "src/index.ts",
+    "src/lighting.ts",
+    "src/lighting-v3.ts",
+    "src/webcodecs.ts",
+  ],
   format: ["esm", "cjs"],
   dts: true,
   sourcemap: true,
@@ -15,6 +20,7 @@ export default defineConfig({
     "react-dom",
     "@aicut/core",
     "@aicut/core/lighting",
+    "@aicut/core/lighting-v3",
     "@aicut/core/webcodecs",
   ],
 });

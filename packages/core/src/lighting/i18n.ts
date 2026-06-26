@@ -20,6 +20,15 @@ export interface LightingLocale {
   lightingDirBottom: string;
   lightingDirFront: string;
   lightingDirBack: string;
+  // ---- v3-only fields ----
+  /** Section label above the color-temperature slider. */
+  lightingColorTemp: string;
+  /** Section label above the in-sphere rotation slider. */
+  lightingRotation: string;
+  /** Brand-color CTA label at the bottom-right of v3. */
+  lightingGenerate: string;
+  /** Bottom-left "Reset" button label in V3. */
+  lightingReset: string;
 }
 
 export const lightingLocaleEn: LightingLocale = {
@@ -37,6 +46,10 @@ export const lightingLocaleEn: LightingLocale = {
   lightingDirBottom: "Bottom",
   lightingDirFront: "Front",
   lightingDirBack: "Back",
+  lightingColorTemp: "Color temperature",
+  lightingRotation: "Rotation",
+  lightingGenerate: "Generate",
+  lightingReset: "Reset",
 };
 
 export const lightingLocaleZh: LightingLocale = {
@@ -54,6 +67,10 @@ export const lightingLocaleZh: LightingLocale = {
   lightingDirBottom: "底部",
   lightingDirFront: "前方",
   lightingDirBack: "后方",
+  lightingColorTemp: "色温",
+  lightingRotation: "旋转角度",
+  lightingGenerate: "生成",
+  lightingReset: "重置",
 };
 
 export function mergeLightingLocale(

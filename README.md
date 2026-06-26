@@ -13,6 +13,10 @@ Canvas-rendered timeline · plain JSON projects · real mp4 export · opt-in thr
 [![License](https://img.shields.io/npm/l/@aicut/core?style=flat-square&color=4c1)](./LICENSE)
 [![Stars](https://img.shields.io/github/stars/ziqiangai/AiCut?style=flat-square&logo=github)](https://github.com/ziqiangai/AiCut/stargazers)
 
+### **🌐 [Try the live demo →](https://ziqiangai.github.io/AiCut/)**
+Upload your own video, edit, animate keyframes, switch lighting picker themes, all in the browser.
+Export needs a backend — see [Configuring the hosted demo](#-configuring-the-hosted-demo) for the env vars.
+
 ![AiCut editor](./docs/screenshots/editor-dark.png)
 
 </div>
@@ -307,6 +311,28 @@ Each backend resolves an ffmpeg binary in this order:
 1. `AICUT_FFMPEG` env var (`/abs/path/to/ffmpeg`)
 2. `./ffmpeg-bin/ffmpeg` next to the backend
 3. System `ffmpeg` on `$PATH`
+
+---
+
+## 🌐 Configuring the hosted demo
+
+The [live demo on GitHub Pages](https://ziqiangai.github.io/AiCut/) is a fully working editor — but the browser alone can't `ffmpeg`-export your project, and it doesn't know where to put video files you upload. Two optional env vars wire those up:
+
+| Env var | What it does |
+| :--- | :--- |
+| `VITE_UPLOAD_ENDPOINT` | POST endpoint that accepts a multipart `file` field and replies with JSON `{ "url": "https://..." }`. Without it, uploaded videos use browser-local `blob:` URLs — playable in the tab but **not** openable by the export backend. |
+| `VITE_BACKEND_TS_URL` | Public URL of the TypeScript exporter ([`backends/ts`](./backends/ts)). Without it, clicking export shows a toast hint. |
+| `VITE_BACKEND_GO_URL` | Public URL of the Go exporter ([`backends/go`](./backends/go)). Same fallback as above. |
+
+For the GitHub Pages deploy, set them as repository secrets (`Settings → Secrets and variables → Actions`). The workflow at [`.github/workflows/pages.yml`](.github/workflows/pages.yml) reads them at build time and bakes the values into the static bundle. Empty / missing → the demo gracefully degrades to "local-only" mode with toast hints when you hit the missing piece.
+
+For local dev, copy [`examples/react-demo/.env.example`](./examples/react-demo/.env.example) to `.env.local` and fill in. Without an `.env.local` the demo defaults to `http://127.0.0.1:8787` (TS) and `http://127.0.0.1:8788` (Go) — start either backend with `pnpm --filter @aicut/backend-ts dev` (or `--filter @aicut/backend-go`) and exports just work.
+
+### One-time GitHub Pages setup
+
+1. Repo → **Settings → Pages → Source: GitHub Actions**.
+2. (Optional) Repo → **Settings → Secrets and variables → Actions → New repository secret** for each of `VITE_UPLOAD_ENDPOINT`, `VITE_BACKEND_TS_URL`, `VITE_BACKEND_GO_URL`.
+3. Push to `main`. The [`pages.yml`](.github/workflows/pages.yml) workflow builds the demo with `VITE_BASE_PATH=/<repo-name>/` and publishes to the `github-pages` environment. First deploy takes a minute or two to provision; subsequent ones land in ~30s.
 
 ---
 

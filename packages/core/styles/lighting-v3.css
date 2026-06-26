@@ -1,0 +1,646 @@
+/* @aicut/core/lighting-v3 — Figma-driven styles.
+   Import via `@aicut/core/lighting-v3.css` alongside the main theme.
+   Uses theme tokens (`--color-brand`, `--aicut-controls-*`) so light /
+   dark modes track the rest of the editor automatically. */
+
+.aicut-lighting-v3 {
+  --aicut-lv3-radius: 12px;
+  --aicut-lv3-card-bg: #ffffff;
+  --aicut-lv3-card-border: rgba(26, 26, 26, 0.1);
+  --aicut-lv3-scene-bg: #ffffff;
+  --aicut-lv3-pill-bg: rgba(26, 26, 26, 0.08);
+  --aicut-lv3-pill-text: #1a1a1a;
+  --aicut-lv3-pill-active-bg: #1a1a1a;
+  --aicut-lv3-pill-active-text: #ffffff;
+  --aicut-lv3-text-fg: #1a1a1a;
+  --aicut-lv3-text-muted: #999999;
+  --aicut-lv3-control-track: rgba(26, 26, 26, 0.08);
+  --aicut-lv3-control-border: rgba(26, 26, 26, 0.16);
+  --aicut-lv3-input-card-fill: rgba(26, 26, 26, 0.06);
+  --aicut-lv3-sphere-inner: rgba(0, 0, 0, 0.08);
+  --aicut-lv3-brand: var(--color-brand, #ff3386);
+  --aicut-lv3-brand-soft: rgba(255, 51, 134, 0.18);
+
+  width: 100%;
+  padding: 20px;
+  background: var(--aicut-lv3-card-bg);
+  border: 1px solid var(--aicut-lv3-card-border);
+  border-radius: var(--aicut-lv3-radius);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  color: var(--aicut-lv3-text-fg);
+  box-sizing: border-box;
+}
+
+/* Dark mode — flipped via `data-aicut-mode="dark"` on the root by
+   the editor when `mode: "dark"` is set. Only token swaps live here;
+   layout / animation stays in the light-mode rules above. */
+.aicut-lighting-v3[data-aicut-mode="dark"] {
+  --aicut-lv3-card-bg: #1a1a1d;
+  --aicut-lv3-card-border: rgba(255, 255, 255, 0.08);
+  --aicut-lv3-scene-bg: #131316;
+  --aicut-lv3-pill-bg: rgba(255, 255, 255, 0.08);
+  --aicut-lv3-pill-text: rgba(255, 255, 255, 0.62);
+  --aicut-lv3-pill-active-bg: #ffffff;
+  --aicut-lv3-pill-active-text: #1a1a1a;
+  --aicut-lv3-text-fg: rgba(255, 255, 255, 0.92);
+  --aicut-lv3-text-muted: rgba(255, 255, 255, 0.45);
+  --aicut-lv3-control-track: rgba(255, 255, 255, 0.10);
+  --aicut-lv3-control-border: rgba(255, 255, 255, 0.18);
+  --aicut-lv3-input-card-fill: rgba(255, 255, 255, 0.08);
+  --aicut-lv3-sphere-inner: rgba(0, 0, 0, 0.55);
+}
+
+.aicut-lighting-v3-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 24px;
+  /* Pin to the top so the scene column's aspect-ratio is respected.
+     Without this, `align-items: stretch` (the default) forces the
+     scene col to match the right column's intrinsic height, which
+     can be taller than the col is wide — the aspect-ratio rule is
+     then ignored and the WebGL canvas overflows past the grid track
+     into the controls column. Visible as the sphere covering the
+     "亮度" / "色温" labels + left preset cells. */
+  align-items: start;
+}
+
+/* ---- Scene column ---- */
+.aicut-lighting-v3-scene-col {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: var(--aicut-lv3-scene-bg);
+  border: 1px solid var(--aicut-lv3-card-border);
+  border-radius: var(--aicut-lv3-radius);
+  overflow: hidden;
+  contain: paint;
+}
+
+.aicut-lighting-v3-scene-viewport {
+  position: absolute;
+  /* Top 48px reserved for the "透视 / 正面" toggle so the sphere
+     visibly clears the buttons. Without this inset the soap-bubble
+     edge crowds the toggle and the layout reads cramped. */
+  inset: 48px 0 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* The WebGL canvas is rendered at min(w,h) px square, but its CSS
+   defaults to 100% / 100%. In v3 the viewport is non-square (header
+   + footer take space), so 100%/100% stretches the canvas
+   horizontally → spheres look like ellipses. Force the canvas to
+   stay square by constraining aspect-ratio + using auto sizing.
+   The flex parent centers it within the rectangular viewport. */
+.aicut-lighting-v3-scene-viewport > canvas {
+  width: auto !important;
+  height: auto !important;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1 / 1;
+  position: relative;
+  z-index: 1;
+}
+
+/* The "sphere" is just a circle with a very subtle inset shadow.
+   Faithful to the Figma SVG: circle fill #D9D9D9 at fill-opacity
+   0.01, wrapped in a group at opacity 0.1, plus a feGaussianBlur
+   inner shadow (stdDeviation=12 → ~24px CSS blur, black at
+   alpha 0.8, dimmed by the group opacity to ~0.08 effective).
+   No drop shadow, no highlight, no body gradient — the soap-bubble
+   feel comes entirely from the inset shadow against a clean white
+   scene background. */
+.aicut-lighting-v3-scene-viewport::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 68%;
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(217, 217, 217, 0.001);
+  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Canvas selector is consolidated above (square aspect + z-index). */
+
+/* Subject stage — CSS 3D layer above the canvas. Has `preserve-3d`
+   so the inner card can sit forward (translateZ) and rotation comes
+   from spinning this parent. */
+.aicut-lighting-v3-subject-stage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 30%;
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  /* The actual rotation is applied via inline style by the editor. */
+  transform-style: preserve-3d;
+  perspective: 600px;
+  z-index: 2;
+  pointer-events: none;
+  transition: transform 80ms ease-out;
+}
+.aicut-lighting-v3-subject-card {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid rgba(26, 26, 26, 0.1);
+  background: rgba(26, 26, 26, 0.08);
+  color: rgba(26, 26, 26, 0.4);
+  box-shadow: 0 0 24px rgba(0, 0, 0, 0.04) inset;
+  /* translateZ pushes the card forward of the sphere center so it
+     visibly "floats" inside the sphere. backface-visibility hides
+     the card when rotation takes it past 90° (so you see nothing
+     on the back side instead of a mirrored render). */
+  transform: translateZ(55px);
+  backface-visibility: hidden;
+}
+
+.aicut-lighting-v3-subject-card--image {
+  background: transparent;
+  border-color: transparent;
+  padding: 0;
+  overflow: hidden;
+}
+.aicut-lighting-v3-subject-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: inherit;
+}
+
+/* ---- Top-center "透视 / 正面" toggle ---- */
+.aicut-lighting-v3-view-toggle {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  gap: 0;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(26, 26, 26, 0.08);
+  z-index: 4;
+}
+.aicut-lighting-v3-view-opt {
+  appearance: none;
+  border: none;
+  background: transparent;
+  height: 26px;
+  min-width: 52px;
+  padding: 0 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: rgba(26, 26, 26, 0.55);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.aicut-lighting-v3-view-opt:hover {
+  color: rgba(26, 26, 26, 0.85);
+}
+.aicut-lighting-v3-view-opt.active {
+  background: #ffffff;
+  color: #1a1a1a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+/* ---- Bottom-left reset button ---- */
+.aicut-lighting-v3-reset {
+  appearance: none;
+  border: none;
+  background: transparent;
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  color: rgba(26, 26, 26, 0.55);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 120ms ease;
+  z-index: 4;
+}
+.aicut-lighting-v3-reset:hover {
+  color: #1a1a1a;
+}
+.aicut-lighting-v3-reset-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---- Rim light toggle row ---- */
+.aicut-lighting-v3-rim-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+  gap: 12px;
+}
+.aicut-lighting-v3-rim-label {
+  /* Reset the row-label top margin since rim sits in a flex row, not
+     stacked under another label. */
+  margin-top: 0;
+}
+.aicut-lighting-v3-toggle {
+  appearance: none;
+  border: none;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: rgba(26, 26, 26, 0.14);
+  position: relative;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+  padding: 0;
+}
+.aicut-lighting-v3-toggle.active {
+  background: rgba(255, 51, 134, 0.32);
+}
+.aicut-lighting-v3-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+.aicut-lighting-v3-toggle.active .aicut-lighting-v3-toggle-thumb {
+  transform: translateX(16px);
+  background: var(--aicut-lv3-brand);
+}
+
+/* ---- Generate badge ---- */
+.aicut-lighting-v3-generate-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  margin-left: 4px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Top-left "智能光源" chip — absolute, sits in the empty margin
+   above the (now smaller) sphere. */
+.aicut-lighting-v3-chip {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  height: 28px;
+  background: var(--aicut-lv3-card-bg);
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--aicut-lv3-text-muted);
+  pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  z-index: 4;
+}
+.aicut-lighting-v3-chip-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---- Controls column ---- */
+.aicut-lighting-v3-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.aicut-lighting-v3-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.aicut-lighting-v3-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.aicut-lighting-v3-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #1a1a1a;
+  border-radius: 6px;
+  transition: background-color 120ms ease;
+}
+.aicut-lighting-v3-close:hover {
+  background: var(--aicut-lv3-pill-bg);
+}
+
+.aicut-lighting-v3-row-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1a1a1a;
+  margin-top: 12px;
+}
+
+/* ---- Sliders ---- */
+.aicut-lighting-v3-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+}
+.aicut-lighting-v3-slider input[type="range"] {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 4px;
+  outline: none;
+  background-color: rgba(26, 26, 26, 0.08);
+  background-repeat: no-repeat;
+  background-size: var(--aicut-lighting-v3-fill, 0%) 100%;
+  background-position: 0 0;
+}
+/* Brightness: solid dark fill on a pale track. Matches the reference
+   image's black-on-light-gray progress style. */
+.aicut-lighting-v3-slider--solid input[type="range"] {
+  background-color: rgba(26, 26, 26, 0.08);
+  background-image: linear-gradient(to right, #1a1a1a, #1a1a1a);
+}
+/* Color temp: warm→cool full-width gradient (the slider value just
+   slides the thumb across; the track itself shows the full range). */
+.aicut-lighting-v3-slider--gradient input[type="range"] {
+  background-image:
+    linear-gradient(
+      to right,
+      #ff6f00 0%,
+      #e5bedb 50%,
+      #1170ff 100%
+    );
+  background-size: 100% 100%;
+}
+.aicut-lighting-v3-slider--brand input[type="range"] {
+  background-color: var(--aicut-lv3-brand-soft);
+  background-image: linear-gradient(
+    to right,
+    var(--aicut-lv3-brand),
+    var(--aicut-lv3-brand)
+  );
+}
+.aicut-lighting-v3-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--aicut-lv3-brand);
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  transition: transform 100ms ease;
+}
+.aicut-lighting-v3-slider--gradient input[type="range"]::-webkit-slider-thumb {
+  background: #ffffff;
+  border: none;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+  width: 20px;
+  height: 12px;
+  border-radius: 6px;
+}
+.aicut-lighting-v3-slider input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid var(--aicut-lv3-brand);
+  cursor: pointer;
+}
+.aicut-lighting-v3-slider input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.08);
+}
+
+.aicut-lighting-v3-slider-bubble {
+  min-width: 32px;
+  height: 22px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffffff;
+  background: var(--aicut-lv3-brand);
+  font-variant-numeric: tabular-nums;
+}
+/* Icon-bearing bubbles are wider, gray on white (matches reference). */
+.aicut-lighting-v3-slider-bubble--with-icon {
+  background: rgba(26, 26, 26, 0.06);
+  color: #1a1a1a;
+  gap: 5px;
+  padding: 0 9px;
+  min-width: 68px;
+  height: 26px;
+  border-radius: 13px;
+  justify-content: flex-start;
+}
+.aicut-lighting-v3-slider-bubble-icon {
+  display: inline-flex;
+  align-items: center;
+  color: rgba(26, 26, 26, 0.55);
+}
+.aicut-lighting-v3-slider-bubble-text {
+  flex: 1;
+  text-align: right;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* ---- 3×2 preset grid ---- */
+.aicut-lighting-v3-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(2, 26px);
+  gap: 6px;
+  margin-top: 4px;
+}
+.aicut-lighting-v3-preset {
+  appearance: none;
+  border: none;
+  background: var(--aicut-lv3-pill-bg);
+  color: rgba(26, 26, 26, 0.6);
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.aicut-lighting-v3-preset:hover {
+  background: rgba(26, 26, 26, 0.14);
+}
+.aicut-lighting-v3-preset.active {
+  background: #1a1a1a;
+  color: #ffffff;
+}
+
+/* ---- Generate CTA ---- */
+.aicut-lighting-v3-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.aicut-lighting-v3-generate {
+  appearance: none;
+  border: none;
+  background: var(--aicut-lv3-brand);
+  color: #ffffff;
+  height: 32px;
+  padding: 0 16px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    transform 80ms ease;
+}
+.aicut-lighting-v3-generate:hover {
+  background: color-mix(in srgb, var(--aicut-lv3-brand) 88%, black);
+}
+.aicut-lighting-v3-generate:active {
+  transform: scale(0.97);
+}
+.aicut-lighting-v3-generate-label {
+  font-weight: 600;
+}
+
+
+/* ========== Dark mode overrides — concrete colors keyed to the
+   visible chrome elements. Layout selectors stay light; only the
+   color blocks change so the cascade is easy to reason about. ========== */
+
+.aicut-lighting-v3[data-aicut-mode="dark"] {
+  color: var(--aicut-lv3-text-fg);
+}
+
+/* Chip + view-toggle pill backgrounds. */
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-chip {
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.7);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-view-toggle {
+  background: rgba(255, 255, 255, 0.06);
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-view-opt {
+  color: rgba(255, 255, 255, 0.55);
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-view-opt:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-view-opt.active {
+  background: rgba(255, 255, 255, 0.96);
+  color: #1a1a1a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Sphere inner shadow needs a different alpha to read on dark bg. */
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-scene-viewport::before {
+  box-shadow: inset 0 0 32px rgba(0, 0, 0, 0.55);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Reset button + title row close button. */
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-reset,
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-close {
+  color: rgba(255, 255, 255, 0.55);
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-reset:hover,
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-close:hover {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Title + row labels. */
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-title,
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-row-label {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* Sliders — track + thumb. */
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-slider--solid input[type="range"] {
+  background-color: rgba(255, 255, 255, 0.1);
+  background-image: linear-gradient(to right, #ffffff, #ffffff);
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-slider input[type="range"]::-webkit-slider-thumb {
+  background: #ffffff;
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-slider--gradient input[type="range"]::-webkit-slider-thumb {
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-slider-bubble--with-icon {
+  background: rgba(255, 255, 255, 0.10);
+  color: rgba(255, 255, 255, 0.92);
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-slider-bubble-icon {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* Preset grid — active vs inactive flip. */
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-preset {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.62);
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-preset:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-preset.active {
+  background: #ffffff;
+  color: #1a1a1a;
+}
+
+/* Rim toggle (inactive track). */
+.aicut-lighting-v3[data-aicut-mode="dark"] .aicut-lighting-v3-toggle {
+  background: rgba(255, 255, 255, 0.16);
+}
+
