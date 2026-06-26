@@ -379,8 +379,18 @@ export class KeyframeOverlay {
       const next = Math.max(0.05, Math.min(16, proj / L));
       const newW = this.drag.baseW * next;
       const newH = this.drag.baseH * next;
-      const newCenterX = this.drag.anchorX + this.drag.dirX * (newW / 2);
-      const newCenterY = this.drag.anchorY + this.drag.dirY * (newH / 2);
+      // For edge handles the perpendicular axis is the anchor's own
+      // axis (axisX = 0 means anchor sits at the clip's horizontal
+      // center; axisY = 0 means it sits at the vertical center).
+      // Multiplying by axisX/axisY gates the half-dimension offset
+      // so an edge drag doesn't shove the clip sideways by half its
+      // width — `anchorX + dirX * (newW/2)` would push horizontally
+      // for a top-edge drag, which is exactly the "jumps right by
+      // the full width" symptom we were seeing.
+      const newCenterX =
+        this.drag.anchorX + this.drag.axisX * this.drag.dirX * (newW / 2);
+      const newCenterY =
+        this.drag.anchorY + this.drag.axisY * this.drag.dirY * (newH / 2);
       // Don't round pan offsets here — quantising them to integers
       // would let the anchored corner jitter as scale grows
       // continuously. Storage precision is fine for floats and the
