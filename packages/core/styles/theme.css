@@ -522,10 +522,14 @@
   border-bottom: 1px solid var(--aicut-controls-border);
   color: var(--aicut-controls-text);
   font-size: 13px;
-  /* Sit above the preview so dropdowns/popovers from header buttons
-     can overflow naturally without z-index plumbing. */
+  /* Sit above the preview AND the keyframe overlay (z-index 3) so
+     dropdowns / popovers anchored to header buttons (e.g. an Export
+     settings popover) overflow over the dashed canvas frame instead
+     of being painted behind it. Header's own children create their
+     own stacking contexts within this one, so internal popovers can
+     freely set whatever z-index they like. */
   position: relative;
-  z-index: 1;
+  z-index: 5;
 }
 
 /* Auto-hide when both slots are empty — keep today's default layout

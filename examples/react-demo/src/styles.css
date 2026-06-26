@@ -314,6 +314,31 @@ body,
   font-weight: 600;
 }
 
+/* GitHub link — pushed to the very right of the topnav via
+   margin-left: auto. Same visual register as the tabs (no border /
+   no fill) so the bar reads as one even row. */
+.demo-topnav-github {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.6);
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.demo-topnav-github:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.demo-topnav-github svg {
+  flex-shrink: 0;
+}
+
 .demo-page {
   flex: 1 1 0;
   min-height: 0;
