@@ -187,12 +187,18 @@ export class KeyframeOverlay {
     if (!ctx) return;
     e.preventDefault();
     e.stopPropagation();
-    const rect = this.editor.getActiveOutputFrameRect()
-      ?? this.editor.getActiveFrameRect();
-    if (!rect) return;
+    // Anchor the scale-distance reference to the SELECTED clip's
+    // own center, NOT the output canvas center. For a PiP overlay
+    // sitting away from canvas center, canvas-distance scaling
+    // makes the corner feel mushy near the canvas center and
+    // hyper-responsive near canvas edges; clip-distance scaling
+    // gives the same uniform-from-center feel everywhere.
+    const clipRect = this.editor.getActiveFrameRect()
+      ?? this.editor.getActiveOutputFrameRect();
+    if (!clipRect) return;
     const hostRect = this.host.getBoundingClientRect();
-    const cx = hostRect.left + rect.x + rect.w / 2;
-    const cy = hostRect.top + rect.y + rect.h / 2;
+    const cx = hostRect.left + clipRect.x + clipRect.w / 2;
+    const cy = hostRect.top + clipRect.y + clipRect.h / 2;
     const startDist = Math.hypot(e.clientX - cx, e.clientY - cy);
     if (startDist < 1) return;
     const target = this.handles[corner];

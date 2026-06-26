@@ -782,7 +782,7 @@ export function App() {
   const webCodecsAvailable = isWebCodecsSupported();
   const [engineKind, setEngineKind] = useState<
     "html" | "canvas" | "webcodecs"
-  >("html");
+  >("canvas");
   // Demo of EditorOptions.trackHeight — shrinking each track row
   // tightens the timeline footprint. setTimelineMetrics is applied
   // at construction so changes here force a remount via `key`.
@@ -796,17 +796,17 @@ export function App() {
   // routes the canvas / WebCodecs engines through the transform
   // pipeline. Data round-trips either way, so flipping off and back on
   // doesn't lose the keyframes.
-  const [keyframesEnabled, setKeyframesEnabled] = useState<boolean>(false);
+  const [keyframesEnabled, setKeyframesEnabled] = useState<boolean>(true);
   // Jump-to-clip-edge nav cluster (|◀ ▶|) + I/O keyboard shortcuts.
   // Off by default — the buttons take toolbar space and the I/O keys
   // would shadow page typing, so hosts opt in like they do for kfs.
-  const [clipEdgeNavEnabled, setClipEdgeNavEnabled] = useState<boolean>(false);
+  const [clipEdgeNavEnabled, setClipEdgeNavEnabled] = useState<boolean>(true);
   // Multi-track PiP — controlled by the editor's built-in toolbar
   // toggle (configured via `pictureInPicture.toolbarToggle: true`
   // below). We mirror the state into React via the editor's
   // `pictureInPictureEnabledChange` event so the toolbar's chip
   // and the demo's chrome stay in sync.
-  const [pipEnabled, setPipEnabled] = useState<boolean>(false);
+  const [pipEnabled, setPipEnabled] = useState<boolean>(true);
   const playbackEngine: PlaybackEngineFactory = useMemo(() => {
     if (engineKind === "canvas") {
       return (opts) => new CanvasCompositorEngine({ ...opts, debug: true });
