@@ -4,6 +4,7 @@ export type {
   EditorApi,
   EditorEventMap,
   EditorEventName,
+  ToolbarLayout,
 } from "./editor.js";
 export type {
   Project,

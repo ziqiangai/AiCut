@@ -9,6 +9,7 @@ import {
   type PlaybackEngineFactory,
   type Project,
   type Theme,
+  type ToolbarLayout,
 } from "@aicut/core";
 
 /**
@@ -78,6 +79,12 @@ const props = defineProps<{
    * / export defaults.
    */
   aspect?: { enabled?: boolean };
+  /**
+   * Toolbar layout. "single" locks the play button at the toolbar's
+   * geometric center; "wrap" splits edit / playback+viewport across
+   * two rows. Defaults to "single". Reactive.
+   */
+  toolbar?: { layout?: ToolbarLayout };
 }>();
 
 const emit = defineEmits<{
@@ -128,6 +135,7 @@ onMounted(() => {
       ? { pictureInPicture: props.pictureInPicture }
       : {}),
     ...(props.aspect != null ? { aspect: props.aspect } : {}),
+    ...(props.toolbar != null ? { toolbar: props.toolbar } : {}),
   });
 
   offs.push(
@@ -212,6 +220,18 @@ watch(
     const desired = enabled === true;
     if (editor.isPictureInPictureEnabled() !== desired) {
       editor.setPictureInPictureEnabled(desired);
+    }
+  },
+);
+
+// Reactive — toolbar layout (single / wrap).
+watch(
+  () => props.toolbar?.layout,
+  (layout) => {
+    if (!editor) return;
+    const desired: ToolbarLayout = layout ?? "single";
+    if (editor.getToolbarLayout() !== desired) {
+      editor.setToolbarLayout(desired);
     }
   },
 );

@@ -176,7 +176,28 @@ export interface EditorOptions {
     enabled?: boolean;
     toolbarAdd?: boolean;
   };
+  /**
+   * Top-toolbar layout policy.
+   *
+   * - `"single"` (default): everything fits on one 44px row. The
+   *   center cluster (time / play / duration / fullscreen) is locked
+   *   to the toolbar's geometric center via CSS grid, so a long
+   *   edit-action group on the left can't push the play button
+   *   off-center. Horizontal scroll kicks in only at very narrow
+   *   editor widths.
+   * - `"wrap"`: two rows. Edit actions occupy row 1; playback +
+   *   viewport controls share row 2 (playback centered, viewport
+   *   end-aligned). Use this when the host opts into the full
+   *   feature set (keyframes + clip-edge nav + PiP add + aspect
+   *   picker) and the chrome no longer fits comfortably.
+   *
+   * Reactive — flip via `editor.setToolbarLayout(...)` or via the
+   * matching prop on the React / Vue wrappers.
+   */
+  toolbar?: { layout?: ToolbarLayout };
 }
+
+export type ToolbarLayout = "single" | "wrap";
 
 export interface EditorEventMap {
   /** Emitted whenever the project mutates. */
@@ -207,6 +228,8 @@ export interface EditorEventMap {
   /** Multi-track preview compositing toggle changed
    *  (Editor.setPictureInPictureEnabled). */
   pictureInPictureEnabledChange: { enabled: boolean };
+  /** Toolbar layout flipped (Editor.setToolbarLayout). */
+  toolbarLayoutChange: { layout: ToolbarLayout };
   /**
    * User clicked the built-in "+ PiP overlay" toolbar button. Host
    * is expected to surface its own file-picker / upload affordance
@@ -319,6 +342,9 @@ export interface EditorApi {
    *  to false. Flipping triggers an engine-side re-composite. */
   isPictureInPictureEnabled(): boolean;
   setPictureInPictureEnabled(enabled: boolean): void;
+  /** Current toolbar layout. Defaults to "single". */
+  getToolbarLayout(): ToolbarLayout;
+  setToolbarLayout(layout: ToolbarLayout): void;
   /** Built-in aspect picker visibility (CapCut-style 比例 dropdown). */
   isAspectEnabled(): boolean;
   setAspectEnabled(enabled: boolean): void;
@@ -530,6 +556,7 @@ export class Editor implements EditorApi {
   private aspectEnabled: boolean;
   private previewFrameEnabled: boolean;
   private pictureInPictureEnabled: boolean;
+  private toolbarLayout: ToolbarLayout;
   private pictureInPictureToolbarAddEnabled: boolean;
   /** Drag-session bookkeeping for ripple-merge undo. See
    *  beginInteraction / endInteraction docs on EditorApi. */
@@ -554,6 +581,7 @@ export class Editor implements EditorApi {
     // preview pass `previewFrame: { enabled: false }` to opt out.
     this.previewFrameEnabled = opts.previewFrame?.enabled !== false;
     this.pictureInPictureEnabled = opts.pictureInPicture?.enabled === true;
+    this.toolbarLayout = opts.toolbar?.layout ?? "single";
     this.pictureInPictureToolbarAddEnabled =
       opts.pictureInPicture?.toolbarAdd === true;
 
@@ -1283,6 +1311,17 @@ export class Editor implements EditorApi {
   /** Whether the built-in "+ PiP overlay" toolbar button is rendered. */
   isPictureInPictureToolbarAddEnabled(): boolean {
     return this.pictureInPictureToolbarAddEnabled;
+  }
+
+  getToolbarLayout(): ToolbarLayout {
+    return this.toolbarLayout;
+  }
+
+  setToolbarLayout(layout: ToolbarLayout): void {
+    if (layout === this.toolbarLayout) return;
+    this.toolbarLayout = layout;
+    this.bus.emit("toolbarLayoutChange", { layout });
+    this.ui.render();
   }
 
   setPictureInPictureEnabled(enabled: boolean): void {

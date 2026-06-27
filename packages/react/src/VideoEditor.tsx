@@ -17,6 +17,7 @@ import {
   type PlaybackEngineFactory,
   type Project,
   type Theme,
+  type ToolbarLayout,
 } from "@aicut/core";
 
 export type VideoEditorApi = EditorApi;
@@ -165,6 +166,16 @@ export interface VideoEditorProps {
   aspect?: { enabled?: boolean };
   /** Fires when the user picks an output aspect (or "Original" → null). */
   onAspectChange?: (aspect: AspectRatio | null) => void;
+  /**
+   * Toolbar layout policy. Reactive — switch between single-row
+   * (center cluster locked at geometric center) and wrap (edit
+   * cluster on row 1, playback + viewport on row 2).
+   *
+   * Defaults to `"single"`. Wrap is the right pick once you turn on
+   * keyframes / clipEdgeNav / PiP-add / aspect picker AND the
+   * available width can't fit them on one row.
+   */
+  toolbar?: { layout?: ToolbarLayout };
 }
 
 /**
@@ -228,6 +239,9 @@ export function VideoEditor(props: VideoEditorProps) {
         : {}),
       ...(cbRef.current.aspect != null
         ? { aspect: cbRef.current.aspect }
+        : {}),
+      ...(cbRef.current.toolbar != null
+        ? { toolbar: cbRef.current.toolbar }
         : {}),
     });
     editorRef.current = editor;
@@ -321,6 +335,15 @@ export function VideoEditor(props: VideoEditorProps) {
       editor.setPictureInPictureEnabled(desired);
     }
   }, [props.pictureInPicture?.enabled]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const desired = props.toolbar?.layout ?? "single";
+    if (editor.getToolbarLayout() !== desired) {
+      editor.setToolbarLayout(desired);
+    }
+  }, [props.toolbar?.layout]);
 
   useEffect(() => {
     const editor = editorRef.current;

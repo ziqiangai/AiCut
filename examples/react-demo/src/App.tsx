@@ -807,6 +807,11 @@ export function App() {
   // `pictureInPictureEnabledChange` event so the toolbar's chip
   // and the demo's chrome stay in sync.
   const [pipEnabled, setPipEnabled] = useState<boolean>(true);
+  // Toolbar layout — "single" is the historical one-row layout with
+  // the play button locked at the geometric center via CSS grid;
+  // "wrap" spreads edit / playback+viewport across two rows for
+  // hosts that opt into the full toolbar feature set.
+  const [toolbarLayout, setToolbarLayout] = useState<"single" | "wrap">("single");
   const playbackEngine: PlaybackEngineFactory = useMemo(() => {
     if (engineKind === "canvas") {
       return (opts) => new CanvasCompositorEngine({ ...opts, debug: true });
@@ -1154,6 +1159,7 @@ export function App() {
             // toggle.
             toolbarAdd: true,
           }}
+          toolbar={{ layout: toolbarLayout }}
           onPictureInPictureAddRequested={triggerPipUpload}
           keyframes={{ enabled: keyframesEnabled }}
           clipEdgeNav={{ enabled: clipEdgeNavEnabled }}
@@ -1545,6 +1551,38 @@ export function App() {
             />
             <span>Show header (title + Share + Export)</span>
           </label>
+        </div>
+
+        <h2>Toolbar layout</h2>
+        <div className="demo-row demo-engine-row">
+          <label>
+            <input
+              type="radio"
+              name="toolbar-layout"
+              value="single"
+              data-testid="demo-toolbar-layout-single"
+              checked={toolbarLayout === "single"}
+              onChange={() => setToolbarLayout("single")}
+            />
+            <span>Single row — play locked at center</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="toolbar-layout"
+              value="wrap"
+              data-testid="demo-toolbar-layout-wrap"
+              checked={toolbarLayout === "wrap"}
+              onChange={() => setToolbarLayout("wrap")}
+            />
+            <span>Two rows — edit / playback + viewport</span>
+          </label>
+          <p className="demo-engine-help">
+            Single locks the play button at the toolbar's geometric
+            center via CSS grid, so a long edit-action cluster on the
+            left can't push it off-center. Wrap gives the full button
+            set its own row when it doesn't fit on one.
+          </p>
         </div>
 
         <h2>Toolbar slots</h2>

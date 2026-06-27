@@ -1,3 +1,4 @@
+import type { ToolbarLayout } from "../editor.js";
 import type { Locale } from "../i18n.js";
 import type { AspectRatio } from "../types.js";
 import { AspectPicker } from "./aspect-picker.js";
@@ -74,6 +75,9 @@ interface ToolbarState {
    *  (default), the button is hidden — same pattern as the
    *  keyframes / clipEdgeNav cluster. */
   pipToolbarAddEnabled: boolean;
+  /** "single" → grid 1fr auto 1fr (play locked at center).
+   *  "wrap"   → 2-row grid (edit / playback + viewport). */
+  layout: ToolbarLayout;
 }
 
 /**
@@ -131,6 +135,8 @@ export class Toolbar {
     this.root = document.createElement("div");
     this.root.className = "aicut-toolbar";
     this.root.setAttribute("data-testid", "aicut-toolbar");
+    // Default layout — render() reconciles when the host flips it.
+    this.root.setAttribute("data-layout", "single");
 
     this.extrasLeft = mkGroup("aicut-toolbar-extras aicut-toolbar-extras-left");
     this.extrasRight = mkGroup("aicut-toolbar-extras aicut-toolbar-extras-right");
@@ -313,6 +319,9 @@ export class Toolbar {
       this.lastState.pipToolbarAddEnabled !== state.pipToolbarAddEnabled
     ) {
       this.pipBtn.style.display = state.pipToolbarAddEnabled ? "" : "none";
+    }
+    if (!this.lastState || this.lastState.layout !== state.layout) {
+      this.root.setAttribute("data-layout", state.layout);
     }
     // Keyframe button — toggle visibility via display, swap icon to
     // reflect whether a kf exists at the playhead, swap tooltip.

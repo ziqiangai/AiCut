@@ -594,23 +594,68 @@
 /* ===== Toolbar ===== */
 
 .aicut-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 44px;
-  padding: 0 12px;
   border-top: 1px solid var(--aicut-controls-border);
   border-bottom: 1px solid var(--aicut-controls-border);
   background: var(--aicut-controls-bg);
-  /* Single-row layout — horizontal scroll fallback only when the
-     editor is too narrow for the toolbar's natural content width.
-     Without overflow-x, the editor root's `overflow: hidden` would
-     silently clip the right cluster (looks like the sidebar covers
-     the editor). With it, the user can scroll to reach hidden
-     controls instead of having the chrome reflow to two rows. */
+}
+
+/* Single-row layout (default). Grid with `1fr auto 1fr` locks the
+   center cluster to the toolbar's geometric center — a long edit
+   group on the left can't push the play button off-center the way a
+   flex layout did. Horizontal scroll kicks in only when the editor
+   is truly narrower than the toolbar's natural content width. */
+.aicut-toolbar[data-layout="single"] {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  column-gap: 12px;
+  height: 44px;
+  padding: 0 12px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
+}
+
+/* Two-row layout. Row 1: edit cluster (left + extras-left). Row 2:
+   playback (centered) + viewport / extras-right (end-aligned).
+   Better for hosts that opt into the full button set —
+   keyframes + clip-edge nav + PiP + aspect picker no longer fight
+   the playback group for horizontal space. */
+.aicut-toolbar[data-layout="wrap"] {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  grid-template-areas:
+    "edit edit edit"
+    ". playback viewport";
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 4px;
+  min-height: 44px;
+  padding: 6px 12px;
+}
+
+.aicut-toolbar[data-layout="single"] > .aicut-toolbar-left,
+.aicut-toolbar[data-layout="single"] > .aicut-toolbar-extras-left {
+  grid-column: 1;
+}
+.aicut-toolbar[data-layout="single"] > .aicut-toolbar-center {
+  grid-column: 2;
+}
+.aicut-toolbar[data-layout="single"] > .aicut-toolbar-right,
+.aicut-toolbar[data-layout="single"] > .aicut-toolbar-extras-right {
+  grid-column: 3;
+}
+
+.aicut-toolbar[data-layout="wrap"] > .aicut-toolbar-extras-left,
+.aicut-toolbar[data-layout="wrap"] > .aicut-toolbar-left {
+  grid-area: edit;
+}
+.aicut-toolbar[data-layout="wrap"] > .aicut-toolbar-center {
+  grid-area: playback;
+}
+.aicut-toolbar[data-layout="wrap"] > .aicut-toolbar-right,
+.aicut-toolbar[data-layout="wrap"] > .aicut-toolbar-extras-right {
+  grid-area: viewport;
 }
 
 .aicut-toolbar::-webkit-scrollbar {
@@ -632,24 +677,17 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 0;
-  /* Default flex `min-width: auto` resolves to the content's
-     min-content — i.e. the group can shrink down to the slider's
-     min-width but no further. Without this, the group collapsed
-     past its content, the toolbar never saw overflow, and the right
-     cluster got silently clipped by the editor root's
-     `overflow: hidden`. Now the toolbar's `overflow-x: auto`
-     correctly engages when the viewport is too narrow. */
 }
 
 .aicut-toolbar-right {
-  justify-content: flex-end;
+  justify-self: end;
 }
 
 .aicut-toolbar-center {
   display: flex;
   align-items: center;
   gap: 10px;
+  justify-self: center;
 }
 
 /* Host-supplied bookend slots — empty until populated. The library
