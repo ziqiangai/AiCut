@@ -137,29 +137,34 @@ export class KeyframeOverlay {
     };
 
     host.appendChild(this.root);
-    // Click-to-select on the preview host. Walks every active
-    // clip's content rect from the topmost track downward and
-    // selects the first one that contains the click point — same
-    // affordance CapCut uses for picking a PiP overlay by clicking
-    // on its visible pixels. Only active when keyframes mode is on
-    // (otherwise selection happens on the timeline as before).
-    this.host.addEventListener("pointerdown", this.onHostPointerDown);
+    // Click-to-select on the preview host — capture phase so it
+    // runs BEFORE the overlay's own frame body / handles fire their
+    // pointerdown. Without that, selecting the main clip would
+    // stretch the frame body across the whole canvas and every
+    // subsequent click would start a translate drag of the main
+    // clip instead of selecting the PiP underneath the cursor.
+    this.host.addEventListener("pointerdown", this.onHostPointerDown, true);
     this.startTick();
   }
 
   private onHostPointerDown = (e: PointerEvent): void => {
     if (e.button !== 0) return;
     if (!this.editor.isKeyframesEnabled()) return;
-    // Skip when the event already landed on the overlay's own
-    // interactive children (frame body, handles) — those have their
-    // own handlers and we don't want to double-fire.
+    // Always ignore clicks on the resize handles — they have their
+    // own scale-drag handler.
     const target = e.target as HTMLElement | null;
-    if (target && this.root.contains(target)) return;
+    if (
+      target &&
+      target.classList.contains("aicut-keyframe-overlay__handle")
+    ) {
+      return;
+    }
     const project = this.editor.getProject();
     const timeMs = this.editor.getTime();
     const hostRect = this.host.getBoundingClientRect();
     const cx = e.clientX - hostRect.left;
     const cy = e.clientY - hostRect.top;
+    const currentSelection = this.editor.getSelection();
     // Walk tracks top-down (highest index = topmost z) so PiP
     // overlays win the hit-test over the main background.
     for (let i = project.tracks.length - 1; i >= 0; i--) {
@@ -173,20 +178,36 @@ export class KeyframeOverlay {
       const rect = this.editor.getClipFrameRect(clip.id);
       if (!rect) continue;
       if (
-        cx >= rect.x &&
-        cx <= rect.x + rect.w &&
-        cy >= rect.y &&
-        cy <= rect.y + rect.h
+        cx < rect.x ||
+        cx > rect.x + rect.w ||
+        cy < rect.y ||
+        cy > rect.y + rect.h
       ) {
-        this.editor.setSelection(clip.id);
+        continue;
+      }
+      if (clip.id === currentSelection) {
+        // Click landed on the already-selected clip — let the
+        // frame body's pointerdown fire and start a translate
+        // drag like before.
         return;
       }
+      // Re-route the click to a selection change and prevent the
+      // frame body from interpreting it as a drag of the previously
+      // selected clip.
+      this.editor.setSelection(clip.id);
+      e.stopPropagation();
+      e.preventDefault();
+      return;
     }
   };
 
   destroy(): void {
     this.destroyed = true;
-    this.host.removeEventListener("pointerdown", this.onHostPointerDown);
+    this.host.removeEventListener(
+      "pointerdown",
+      this.onHostPointerDown,
+      true,
+    );
     if (this.rafHandle != null) cancelAnimationFrame(this.rafHandle);
     if (this.wheelInteractionTimer != null) {
       clearTimeout(this.wheelInteractionTimer);
