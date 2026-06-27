@@ -142,6 +142,12 @@ app.post("/export", async (req, reply) => {
  *   - uploads: `<uuid><.mp4|.mov|.webm|.mkv|.m4v>`
  * Both shapes are anchored at uuid + a whitelisted extension so the
  * regex catches all path-traversal attempts before disk lookup.
+ *
+ * Supports HTTP Range requests — required by ffmpeg when reading a
+ * QuickTime/.mov with the `moov` atom at the END of the file (typical
+ * for screen recordings). Without range support ffmpeg can't seek to
+ * the end of the stream, fails with "moov atom not found", and the
+ * export aborts before encoding the first frame.
  */
 app.get("/files/:id", async (req, reply) => {
   const { id } = req.params as { id: string };
@@ -158,11 +164,44 @@ app.get("/files/:id", async (req, reply) => {
       ext === ".webm" ? "video/webm" : ext === ".mov" ? "video/quicktime" : "video/mp4";
     reply
       .header("content-type", ctype)
-      .header("content-length", stats.size)
       .header("cache-control", "no-store")
-      // Range support lets the browser seek without buffering the
-      // whole file — important for editor scrubbing on large uploads.
       .header("accept-ranges", "bytes");
+
+    const range = req.headers.range;
+    const rangeMatch = range && /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (rangeMatch) {
+      const totalSize = stats.size;
+      const startStr = rangeMatch[1];
+      const endStr = rangeMatch[2];
+      let start = startStr ? parseInt(startStr, 10) : 0;
+      let end = endStr ? parseInt(endStr, 10) : totalSize - 1;
+      // Handle suffix range `bytes=-N` (last N bytes).
+      if (!startStr && endStr) {
+        const suffix = parseInt(endStr, 10);
+        start = Math.max(0, totalSize - suffix);
+        end = totalSize - 1;
+      }
+      if (
+        Number.isNaN(start) ||
+        Number.isNaN(end) ||
+        start > end ||
+        start >= totalSize
+      ) {
+        return reply
+          .code(416)
+          .header("content-range", `bytes */${totalSize}`)
+          .send({ error: "range not satisfiable" });
+      }
+      end = Math.min(end, totalSize - 1);
+      const chunkSize = end - start + 1;
+      reply
+        .code(206)
+        .header("content-range", `bytes ${start}-${end}/${totalSize}`)
+        .header("content-length", chunkSize);
+      return reply.send(createReadStream(p, { start, end }));
+    }
+
+    reply.header("content-length", stats.size);
     return reply.send(createReadStream(p));
   }
   return reply.code(404).send({ error: "not found" });

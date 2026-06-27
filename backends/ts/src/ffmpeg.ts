@@ -22,6 +22,119 @@ export async function resolveFfmpeg(): Promise<string> {
   return "ffmpeg";
 }
 
+/** Resolve ffprobe alongside ffmpeg, with the same precedence. */
+export async function resolveFfprobe(): Promise<string> {
+  const envBin = process.env["AICUT_FFPROBE"];
+  if (envBin && (await fileExists(envBin))) return envBin;
+
+  const bundled = path.resolve(__dirname, "..", "ffmpeg-bin", "ffprobe");
+  if (await fileExists(bundled)) return bundled;
+
+  return "ffprobe";
+}
+
+/** Same proxy-strip env used by ffmpeg subprocesses — see runFfmpeg
+ *  for the why. Exported so ffprobe spawns can share it. */
+function noProxyEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.HTTP_PROXY;
+  delete env.http_proxy;
+  delete env.HTTPS_PROXY;
+  delete env.https_proxy;
+  delete env.ALL_PROXY;
+  delete env.all_proxy;
+  env.NO_PROXY = "localhost,127.0.0.1,::1";
+  env.no_proxy = "localhost,127.0.0.1,::1";
+  return env;
+}
+
+/**
+ * Probe a source's intrinsic video dimensions. Used to derive the
+ * export canvas size when the client doesn't pass one, matching the
+ * frontend's `canvasReferenceDims` (= first video clip on the bottom
+ * track). Returns null on any failure — caller decides the fallback.
+ */
+export async function probeVideoDimensions(
+  ffprobeBin: string,
+  url: string,
+): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const proc = spawn(
+      ffprobeBin,
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "csv=p=0",
+        url,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"], env: noProxyEnv() },
+    );
+    let stdout = "";
+    proc.stdout.on("data", (b: Buffer) => {
+      stdout += b.toString();
+    });
+    proc.on("error", () => resolve(null));
+    proc.on("close", () => {
+      const trimmed = stdout.trim();
+      const m = /^(\d+),(\d+)$/.exec(trimmed);
+      if (!m) return resolve(null);
+      const width = Number(m[1]);
+      const height = Number(m[2]);
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+        return resolve(null);
+      }
+      resolve({ width, height });
+    });
+  });
+}
+
+/**
+ * Check whether a source has at least one audio stream. The render
+ * graph hits a hard "no streams" error when we wire `[N:a]` against
+ * a video-only source (and ffmpeg's `?` modifier only helps if the
+ * sub-graph is independently dropped — chained filters trip the same
+ * error). Probe up front so we know which clips contribute audio.
+ *
+ * Failures (network error, missing binary) treat the source as
+ * audio-less rather than aborting the whole render — at worst the
+ * output is silent, which is recoverable.
+ */
+export async function probeHasAudio(
+  ffprobeBin: string,
+  url: string,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const proc = spawn(
+      ffprobeBin,
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "a",
+        "-show_entries",
+        "stream=index",
+        "-of",
+        "csv=p=0",
+        url,
+      ],
+      { stdio: ["ignore", "pipe", "pipe"], env: noProxyEnv() },
+    );
+    let stdout = "";
+    proc.stdout.on("data", (b: Buffer) => {
+      stdout += b.toString();
+    });
+    proc.on("error", () => resolve(false));
+    proc.on("close", () => {
+      resolve(stdout.trim().length > 0);
+    });
+  });
+}
+
 async function fileExists(p: string): Promise<boolean> {
   try {
     await access(p, constants.X_OK);
@@ -57,26 +170,10 @@ export function runFfmpeg(
     // onStdoutLine consumer, draining it costs nothing meaningful but
     // keeps the contract uniform.
     // Strip any inherited HTTP/HTTPS proxy env vars from the ffmpeg
-    // subprocess. ffmpeg's HTTP client doesn't always honor NO_PROXY,
-    // and a user's system proxy (Clash, mitmproxy, work VPN) frequently
-    // intercepts `http://localhost:<vite-port>` and returns 503. For
-    // backend rendering of local dev sources we don't need a proxy —
-    // production hosts that legitimately need one should override this
-    // via their own deployment env. We ALSO append loopback hosts to
-    // NO_PROXY for clients that DO honor it (libcurl-based ones).
-    const noProxy = "localhost,127.0.0.1,::1";
-    const env: NodeJS.ProcessEnv = { ...process.env };
-    delete env.HTTP_PROXY;
-    delete env.http_proxy;
-    delete env.HTTPS_PROXY;
-    delete env.https_proxy;
-    delete env.ALL_PROXY;
-    delete env.all_proxy;
-    env.NO_PROXY = noProxy;
-    env.no_proxy = noProxy;
+    // subprocess — see noProxyEnv for the why.
     const proc = spawn(bin, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      env,
+      env: noProxyEnv(),
     });
     let stderr = "";
     let stdoutBuf = "";
