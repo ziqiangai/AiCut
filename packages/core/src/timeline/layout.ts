@@ -11,7 +11,11 @@ export const HEADER_WIDTH = 96;
 export const HANDLE_PX = 8;
 export const CLIP_INSET = 6;
 export const SCALE_MIN = 10;
-export const SCALE_MAX = 400;
+/** Tuned so the user can zoom down to "1 frame per major tick" at
+ *  30 fps with the default `rulerMinTickPx` (80px). 80px × 30 fps =
+ *  2400 px/sec. Higher fps projects can still hit 1-frame granularity
+ *  visually by lowering `rulerMinTickPx`. */
+export const SCALE_MAX = 2400;
 
 /**
  * Left / right padding inside the timeline canvas, between the header
@@ -148,6 +152,44 @@ export function niceTickSeconds(targetSec: number): number {
   else if (base < 7) nice = 5;
   else nice = 10;
   return nice * Math.pow(10, exp);
+}
+
+/**
+ * Pick the ruler's major + sub tick interval for the given zoom + fps.
+ *
+ * Behavior matches CapCut-desktop: major ticks ALWAYS land on whole
+ * seconds (1s, 2s, 5s, …) so the labels stay readable at every zoom.
+ * Sub-ticks switch to frame-aligned spacing (1 per frame) once the
+ * zoom is high enough to render a frame as ≥ `FRAME_SUB_MIN_PX` —
+ * that's how seconds + 30 frames-per-second both stay visible at the
+ * same time. At lower zoom we keep the classic 5-subs-per-major.
+ */
+const FRAME_SUB_MIN_PX = 10;
+
+export interface RulerTicks {
+  /** Major (labeled) tick interval in seconds. Always ≥ 1s. */
+  majorSec: number;
+  /** Unlabeled sub-tick interval in seconds. Smaller than majorSec. */
+  subSec: number;
+}
+
+export function pickRulerTicks(
+  targetSec: number,
+  fps: number,
+  pxPerSec: number,
+): RulerTicks {
+  const frameSec = 1 / Math.max(1, fps);
+  // Major: pick the smallest nice interval ≥ 1s that's at least the
+  // requested target. `niceTickSeconds` may return 0.2s / 0.5s at high
+  // zoom — clamp those up to 1s so the labels stay "Ns" no matter how
+  // far the user zooms in.
+  const majorSec = Math.max(1, niceTickSeconds(targetSec));
+  // Sub: drop to 1-frame ticks once frames are visually distinct.
+  // Otherwise 5 subs per major (0.2s, 0.4s, …).
+  const framePx = pxPerSec * frameSec;
+  const subSec =
+    framePx >= FRAME_SUB_MIN_PX ? frameSec : majorSec / 5;
+  return { majorSec, subSec };
 }
 
 export function formatRulerLabel(sec: number): string {

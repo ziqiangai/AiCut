@@ -20,10 +20,11 @@ import {
   contentLeftX,
   contentWidth,
   formatRulerLabel,
-  niceTickSeconds,
+  pickRulerTicks,
   trackY,
   uncoveredIntervals,
 } from "./layout.js";
+import { projectFps } from "../model.js";
 
 export interface DrawStyle {
   bg: string;
@@ -64,6 +65,9 @@ export interface DrawState {
   scrollbarActiveX: boolean;
   /** Resolved locale used for canvas-painted labels. */
   locale: Locale;
+  /** Minimum pixel gap between ruler major ticks — drives the auto
+   *  picker. Mirrored from `TimelineOptions.rulerMinTickPx` (default 80). */
+  rulerMinTickPx: number;
   /** When true, paint a diamond marker on each clip per keyframe.
    *  Wired to `Editor.isKeyframesEnabled()`. */
   keyframesEnabled: boolean;
@@ -397,9 +401,12 @@ function drawRuler(
   ctx.lineTo(W, RULER_HEIGHT - 0.5);
   ctx.stroke();
 
-  const minPx = 80;
-  const tickSec = niceTickSeconds(minPx / pxPerSec);
-  const subSec = tickSec / 5;
+  const minPx = state.rulerMinTickPx;
+  const fps = projectFps(state.project);
+  const { majorSec, subSec } = pickRulerTicks(minPx / pxPerSec, fps, pxPerSec);
+  // Sub-ticks per major. Round to int because sub-tick spacing is
+  // 1/fps at high zoom and the division isn't exact in binary.
+  const subDiv = Math.max(1, Math.round(majorSec / subSec));
 
   const firstVisibleSec = Math.max(0, scrollLeft / pxPerSec - subSec);
   const lastVisibleSec = (scrollLeft + rulerW) / pxPerSec + subSec;
@@ -416,12 +423,24 @@ function drawRuler(
     if (s < 0) continue;
     const x = baseX + s * pxPerSec - scrollLeft;
     if (x < baseX || x > W) continue;
-    const isMajor = Math.abs(((s / tickSec) % 1)) < 1e-3;
+    // Index within the current major (0 → at a whole-second boundary).
+    // Integer modulo dodges the float-mod glitch where e.g.
+    // `0.6 / 0.2 = 2.9999…` would miss a label like 0.6s.
+    const subIdx = ((i % subDiv) + subDiv) % subDiv;
+    const isMajor = subIdx === 0;
+    // Frame mode (subDiv > 5) gets secondary labels every 5 frames
+    // inside the second — keeps "5f / 10f / 15f / …" visible even
+    // when the next whole-second mark is off-screen. Low-zoom mode
+    // (subDiv === 5) already has labels at every major, no secondary
+    // needed.
+    const isMidLabel = !isMajor && subDiv > 5 && subIdx % 5 === 0;
     ctx.strokeStyle = isMajor
       ? withAlpha(style.text, 0.5)
-      : withAlpha(style.text, 0.25);
+      : isMidLabel
+        ? withAlpha(style.text, 0.35)
+        : withAlpha(style.text, 0.22);
     ctx.lineWidth = 1;
-    const h = isMajor ? 10 : 6;
+    const h = isMajor ? 10 : isMidLabel ? 8 : 5;
     ctx.beginPath();
     ctx.moveTo(x + 0.5, RULER_HEIGHT - h);
     ctx.lineTo(x + 0.5, RULER_HEIGHT - 1);
@@ -429,6 +448,9 @@ function drawRuler(
     if (isMajor) {
       ctx.fillStyle = withAlpha(style.textMuted, 0.85);
       ctx.fillText(formatRulerLabel(s), x + 3, RULER_HEIGHT - 12);
+    } else if (isMidLabel) {
+      ctx.fillStyle = withAlpha(style.textMuted, 0.55);
+      ctx.fillText(`${subIdx}f`, x + 3, RULER_HEIGHT - 12);
     }
   }
 }
@@ -605,8 +627,16 @@ function drawClipAt(
   // typically the panX/panY/scale trio from a single toolbar click).
   // Painted on the clip body vertical center; selected = brand fill,
   // hovered = brighter + slightly bigger.
+  // Keyframes paint on BOTH the real (possibly dim) clip and any
+  // ghost clip during a drag — skipping them on dim made the diamond
+  // appear to vanish the moment a user clicked just outside the kf
+  // hit radius (their click drags the clip, the real clip dims, and
+  // the diamond on the ORIGINAL position quietly drops out of the
+  // canvas — looks like "I dragged the kf and it disappeared"). The
+  // ghost clip painted underneath still carries its own diamonds at
+  // the drag offset, so the user can see both the residual position
+  // and the destination.
   if (
-    !dim &&
     state.keyframesEnabled &&
     clip.keyframes &&
     clip.keyframes.length > 0
@@ -641,15 +671,21 @@ function drawClipAt(
       ctx.lineTo(kfX, diamondY + drawSize);
       ctx.lineTo(kfX - drawSize, diamondY);
       ctx.closePath();
+      // Dim clips paint diamonds at reduced opacity — visible but
+      // muted, so the user sees both the "where it WAS" residual on
+      // the source position and the "where it IS now" diamond on the
+      // ghost.
+      const fillAlpha = dim ? 0.4 : 0.85;
+      const strokeAlpha = dim ? 0.3 : 0.65;
       ctx.fillStyle = isSelected
         ? style.selectedRing
         : isHovered
           ? "#ffffff"
-          : withAlpha(style.text, 0.85);
+          : withAlpha(style.text, fillAlpha);
       ctx.fill();
       ctx.strokeStyle = isHovered
         ? style.selectedRing
-        : "rgba(0, 0, 0, 0.65)";
+        : `rgba(0, 0, 0, ${strokeAlpha})`;
       ctx.lineWidth = isHovered ? 1.5 : 1;
       ctx.stroke();
     }

@@ -1,6 +1,49 @@
 import { createId } from "./ids.js";
 import { interpolateProp } from "./keyframes/interpolate.js";
-import type { Clip, Keyframe, KeyframeProp, Ms, Project, Track } from "./types.js";
+import type {
+  AspectRatio,
+  Clip,
+  Keyframe,
+  KeyframeProp,
+  Ms,
+  Project,
+  ProjectOutput,
+  Track,
+} from "./types.js";
+
+/**
+ * Default 1080p-tier output dimensions per aspect ratio — the canvas
+ * the editor renders into when the user picks an aspect from the
+ * built-in chip. 1080p is the lowest-common-denominator distribution
+ * target (web, mobile, most SaaS encoders) and matches CapCut's
+ * "Standard 1080p" default. Hosts can override by writing directly
+ * into `project.output` via `editor.setOutput(...)`.
+ */
+export const DEFAULT_OUTPUT_DIMS: Record<
+  AspectRatio,
+  { width: number; height: number }
+> = {
+  "16:9": { width: 1920, height: 1080 },
+  "9:16": { width: 1080, height: 1920 },
+  "1:1": { width: 1080, height: 1080 },
+  "4:3": { width: 1440, height: 1080 },
+  "3:4": { width: 1080, height: 1440 },
+  "4:5": { width: 1080, height: 1350 },
+  "21:9": { width: 2560, height: 1080 },
+};
+
+/** Pick canvas dims for a chosen aspect, snapping to even pixels. */
+export function defaultOutputForAspect(
+  aspect: AspectRatio,
+): { width: number; height: number } {
+  const d = DEFAULT_OUTPUT_DIMS[aspect];
+  return { width: evenPx(d.width), height: evenPx(d.height) };
+}
+
+function evenPx(n: number): number {
+  const r = Math.max(2, Math.round(n));
+  return r % 2 === 0 ? r : r - 1;
+}
 
 const KEYFRAME_PROPS: KeyframeProp[] = ["panX", "panY", "scale"];
 
@@ -13,8 +56,15 @@ export const DEFAULT_FPS = 30;
 /** Shift + arrow nudges this many frames at once. */
 export const BIG_FRAME_STEP = 10;
 
-/** Project's effective fps — falls back to the default when unset. */
+/**
+ * Project's effective fps. Resolution order: `output.fps` (new) →
+ * top-level `fps` (legacy back-compat) → `DEFAULT_FPS`. The two
+ * fields coexist so existing projects keep working without a manual
+ * migration; `setOutput` writes to `output.fps` going forward.
+ */
 export function projectFps(project: Project): number {
+  const fromOutput = project.output?.fps;
+  if (fromOutput != null && fromOutput > 0) return fromOutput;
   const f = project.fps;
   return f != null && f > 0 ? f : DEFAULT_FPS;
 }
@@ -115,7 +165,40 @@ export function normalizeProject(project: Project): Project {
       .sort((a, b) => a.start - b.start);
     return { ...t, id: t.id || createId("track"), clips };
   });
-  return { version: 1, sources, tracks };
+  // Preserve top-level project fields beyond version/sources/tracks.
+  // `aspect`, `fps`, and `output` are authored state that must survive
+  // a setProject round-trip — without this, picking 9:16 in the toolbar
+  // and then adding a clip (which routes through setProject) used to
+  // silently reset the canvas back to the first-clip fallback.
+  const norm: Project = { version: 1, sources, tracks };
+  if (project.aspect != null) norm.aspect = project.aspect;
+  if (project.fps != null && project.fps > 0) norm.fps = project.fps;
+  // Fill in `output` for projects that don't have it yet — `aspect`
+  // → DEFAULT_OUTPUT_DIMS, falling back to a sane 1080p when neither
+  // is set. Hosts that need a different size can call `setOutput`
+  // anytime; once persisted in the project JSON the migration is
+  // a no-op.
+  const explicit = normalizeOutput(project.output);
+  if (explicit) {
+    norm.output = explicit;
+  } else if (project.aspect) {
+    const dims = defaultOutputForAspect(project.aspect);
+    norm.output = { width: dims.width, height: dims.height };
+    if (project.fps != null && project.fps > 0) norm.output.fps = project.fps;
+  }
+  return norm;
+}
+
+function normalizeOutput(
+  output: ProjectOutput | undefined,
+): ProjectOutput | null {
+  if (!output) return null;
+  const w = evenPx(output.width);
+  const h = evenPx(output.height);
+  if (w <= 0 || h <= 0) return null;
+  const norm: ProjectOutput = { width: w, height: h };
+  if (output.fps != null && output.fps > 0) norm.fps = output.fps;
+  return norm;
 }
 
 /**

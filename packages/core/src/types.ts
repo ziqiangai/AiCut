@@ -103,12 +103,33 @@ export interface Project {
   sources: MediaSource[];
   tracks: Track[];
   /**
+   * Output canvas dimensions in pixels. THIS is the reference frame
+   * for every spatial value in the project — `keyframes[i].value` for
+   * `panX`/`panY`, the clip-level static `panX/panY` fallbacks, and
+   * the editor's canvas-guide rectangle all live in this coordinate
+   * system. The preview is just a scaled view of this canvas; the
+   * export renders at exactly these dimensions (or a 2× internal pass
+   * downsampled to them).
+   *
+   * Picking a fixed canvas is a CapCut / Premiere / FCP convention —
+   * decoupling authoring units from preview-area pixels means a
+   * project moves between machines / DPIs / preview sizes without
+   * "drifting". Optional for back-compat: `normalizeProject` fills
+   * this in from `aspect` (via DEFAULT_OUTPUT_DIMS) or the first
+   * clip's source dims when missing, so legacy projects round-trip
+   * cleanly.
+   */
+  output?: ProjectOutput;
+  /**
    * Project frame rate. Drives keyboard frame-stepping (← / →), the
    * future timecode display, and ffmpeg compilation of keyframe
    * animations. Optional for back-compat — projects without `fps`
    * default to 30, matching consumer NLE convention (CapCut /
    * Premiere project defaults). `normalizeProject` does NOT fill
    * this in, so a missing field stays missing through round-trips.
+   *
+   * Deprecated in favor of `output.fps`; still honored for legacy
+   * projects, but newly authored projects should set `output.fps`.
    */
   fps?: number;
   /**
@@ -119,8 +140,21 @@ export interface Project {
    * back-compat — projects without an aspect are treated as "source"
    * (the host decides; usually means follow the first clip's
    * intrinsic aspect). `normalizeProject` does NOT fill this in.
+   *
+   * Authoring aspect is a UI affordance for picking common ratios;
+   * the authoritative dimensions live in `output`. Setting an aspect
+   * updates `output` to a sensible tier in that ratio.
    */
   aspect?: AspectRatio;
+}
+
+export interface ProjectOutput {
+  /** Output canvas width in pixels. Must be even (H.264 requirement). */
+  width: number;
+  /** Output canvas height in pixels. Must be even (H.264 requirement). */
+  height: number;
+  /** Output frame rate. Falls back to `Project.fps` or 30 when unset. */
+  fps?: number;
 }
 
 /**

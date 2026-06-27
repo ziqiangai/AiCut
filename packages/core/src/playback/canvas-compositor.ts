@@ -29,9 +29,15 @@ export interface CanvasCompositorEngineOptions extends PlaybackEngineOptions {
  * stone toward a WebGL or WebCodecs path (those replace the decoder
  * but keep the canvas-blit pattern).
  *
- * Limits: same as `HtmlVideoEngine` (one source visible at a time,
- * seek snaps to the browser's keyframe pipeline). The point is the
- * surface, not new capability.
+ * Multi-track / PiP: `setPictureInPictureEnabled(true)` flips the
+ * paint loop into multi-clip composite mode — every video track's
+ * currently-active clip draws in reverse track order so track 0 ends
+ * up on top. Audio: track 0 stays unmuted, lower tracks mute.
+ *
+ * Limits: same-source same-time tie still goes to a single decoder
+ * (one `<video>` per source). Seek snaps to the browser's keyframe
+ * pipeline. No transitions / shaders / filters — the canvas blit
+ * pattern is the foundation those would build on, not the feature.
  */
 export class CanvasCompositorEngine implements PlaybackEngine {
   private host: HTMLElement;
@@ -42,26 +48,34 @@ export class CanvasCompositorEngine implements PlaybackEngine {
   private badge: HTMLDivElement | null = null;
   private videos = new Map<string, HTMLVideoElement>();
   private project: Project;
-  private currentClipId: string | null = null;
+  /** trackId → active clipId on that track. Top track's clip is the
+   *  "primary" — drives output canvas + audio + overlay rects. */
+  private activeByTrack = new Map<string, string>();
   private playing = false;
   private timeMs: Ms = 0;
   private rafHandle: number | null = null;
   private lastFrameTs = 0;
   private paintedFrames = 0;
-  /** Output frame rect (no transform) — fixed bounds. */
+  private pictureInPictureEnabled = false;
+  /** Output canvas rect (no transform) — same for every clip on
+   *  the same paint pass. */
   private lastOutputRect: {
     x: number;
     y: number;
     w: number;
     h: number;
   } | null = null;
-  /** Post-transform content rect. */
-  private lastFrameRect: {
-    x: number;
-    y: number;
-    w: number;
-    h: number;
-  } | null = null;
+  /** Post-transform content rect, keyed by clipId. With PiP on a
+   *  paint pass records one entry per painted clip; the overlay can
+   *  ask for any specific one (the SELECTED clip when PiP is on,
+   *  the primary clip otherwise). */
+  private frameRectsByClip = new Map<
+    string,
+    { x: number; y: number; w: number; h: number }
+  >();
+  /** Primary (top-track) clip id from the last paint — used as the
+   *  fallback for `getFrameRect()` when no clipId is passed. */
+  private primaryClipIdLastPaint: string | null = null;
 
   onTimeUpdate?: (ms: Ms) => void;
   onEnded?: () => void;
@@ -130,29 +144,25 @@ export class CanvasCompositorEngine implements PlaybackEngine {
   setProject(next: Project): void {
     this.project = next;
     this.syncSources();
-    const clip = this.clipAtTime(this.timeMs);
-    if (!clip) {
-      this.timeMs = 0;
-      this.activate(null);
-      this.onTimeUpdate?.(0);
-    } else {
-      this.activate(clip);
-      this.seekVideoToClipOffset(clip, this.timeMs - clip.start);
-    }
+    this.refreshActive();
+  }
+
+  setPictureInPictureEnabled(enabled: boolean): void {
+    if (this.pictureInPictureEnabled === enabled) return;
+    this.pictureInPictureEnabled = enabled;
+    this.refreshActive();
   }
 
   play(): void {
     if (this.playing) return;
     if (this.totalDuration() <= 0) return;
-    const clip =
-      this.clipAtTime(this.timeMs) ?? this.nextClipAfterTime(this.timeMs);
-    if (!clip) return;
-    if (this.timeMs < clip.start) this.timeMs = clip.start;
-    this.activate(clip);
-    this.seekVideoToClipOffset(clip, this.timeMs - clip.start);
-    const v = this.videos.get(clip.sourceId);
-    if (!v) return;
-    void v.play().catch((err) => this.onError?.(err as Error));
+    if (this.activeByTrack.size === 0) {
+      const next = this.nextClipAfterTime(this.timeMs);
+      if (!next) return;
+      this.timeMs = next.start;
+      this.refreshActive();
+    }
+    this.playAllActive();
     this.playing = true;
     this.lastFrameTs = performance.now();
   }
@@ -160,10 +170,7 @@ export class CanvasCompositorEngine implements PlaybackEngine {
   pause(): void {
     if (!this.playing) return;
     this.playing = false;
-    if (this.currentClipId) {
-      const clip = this.clipById(this.currentClipId);
-      if (clip) this.videos.get(clip.sourceId)?.pause();
-    }
+    this.pauseAllActive();
   }
 
   isPlaying(): boolean {
@@ -182,13 +189,7 @@ export class CanvasCompositorEngine implements PlaybackEngine {
     }
     const clamped = Math.max(0, Math.min(timeMs, total));
     this.timeMs = clamped;
-    const clip = this.clipAtTime(clamped);
-    if (clip) {
-      this.activate(clip);
-      this.seekVideoToClipOffset(clip, clamped - clip.start);
-    } else {
-      this.activate(null);
-    }
+    this.refreshActive();
     this.onTimeUpdate?.(clamped);
   }
 
@@ -240,13 +241,137 @@ export class CanvasCompositorEngine implements PlaybackEngine {
     }
   }
 
-  private activate(clip: Clip | null): void {
-    if (clip?.id === this.currentClipId) return;
-    if (this.currentClipId) {
-      const prev = this.clipById(this.currentClipId);
-      if (prev) this.videos.get(prev.sourceId)?.pause();
+  /**
+   * Resolve the active clip per track for the current playhead and
+   * reconcile per-source playback / audio policy. PiP off = only the
+   * top track contributes; PiP on = every video track.
+   */
+  private refreshActive(): void {
+    const next = this.computeActiveClips();
+    this.activeByTrack = next;
+
+    const visibleSources = new Set<string>();
+    for (const clipId of next.values()) {
+      const clip = this.clipById(clipId);
+      if (clip) visibleSources.add(clip.sourceId);
     }
-    this.currentClipId = clip ? clip.id : null;
+
+    // Pause sources that lost activation.
+    for (const [sourceId, v] of this.videos) {
+      if (visibleSources.has(sourceId)) continue;
+      if (!v.paused) v.pause();
+    }
+
+    // Seek (+ play if running) every newly-active source. Iterate
+    // bottom-up so track 0 ends up last — same-source tie wins for
+    // the primary clip's currentTime.
+    for (let i = this.project.tracks.length - 1; i >= 0; i--) {
+      const tid = this.project.tracks[i]!.id;
+      const cid = next.get(tid);
+      if (!cid) continue;
+      const clip = this.clipById(cid);
+      if (!clip) continue;
+      this.seekVideoToClipOffset(clip, this.timeMs - clip.start);
+      if (this.playing) {
+        const v = this.videos.get(clip.sourceId);
+        if (v) void v.play().catch((err) => this.onError?.(err as Error));
+      }
+    }
+
+    // Audio policy: only the top track's source unmuted.
+    const primaryClip = this.primaryActiveClip();
+    const primarySourceId = primaryClip?.sourceId ?? null;
+    for (const [sourceId, v] of this.videos) {
+      v.muted = sourceId !== primarySourceId;
+    }
+  }
+
+  private computeActiveClips(): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const track of this.project.tracks) {
+      if (track.kind !== "video") continue;
+      for (const c of track.clips) {
+        if (
+          this.timeMs >= c.start &&
+          this.timeMs < c.start + (c.out - c.in)
+        ) {
+          result.set(track.id, c.id);
+          break;
+        }
+      }
+      // PiP off: stop AFTER we've found one active clip — but keep
+      // walking if the first track was empty so the user still sees
+      // a lower-track clip even with PiP disabled. Without this, a
+      // gap on track 0 would black the preview while track 1 had
+      // content.
+      if (!this.pictureInPictureEnabled && result.size > 0) break;
+    }
+    return result;
+  }
+
+  /**
+   * The "primary" clip = the bottom-most active clip = the main
+   * canvas reference + audio source. It's track `0` when track `0`
+   * has content; if that track is empty at the playhead, fall
+   * through to the next video track with a clip. (Without that
+   * fall-through, dragging the only track-0 clip out of the
+   * playhead range blanked the preview even though a lower-track
+   * clip was still active.)
+   */
+  /**
+   * Dims of the canvas-anchor clip — the first clip (by start time)
+   * on the first video track. Stable across playback so the canvas
+   * doesn't resize at clip boundaries. Returns null when nothing's
+   * decoded yet.
+   */
+  getCanvasReferenceDims(): [number, number] | null {
+    // `Project.output` is the authoritative reference frame when set.
+    // Falls through to the anchor-clip dims so legacy projects with
+    // neither aspect nor output still resolve to a stable canvas.
+    const out = this.project.output;
+    if (out && out.width > 0 && out.height > 0) return [out.width, out.height];
+    for (const track of this.project.tracks) {
+      if (track.kind !== "video") continue;
+      let earliest: { c: { sourceId: string; start: number } } | null = null;
+      for (const c of track.clips) {
+        if (!earliest || c.start < earliest.c.start) earliest = { c };
+      }
+      if (!earliest) continue;
+      const v = this.videos.get(earliest.c.sourceId);
+      if (!v || v.videoWidth === 0 || v.videoHeight === 0) continue;
+      return [v.videoWidth, v.videoHeight];
+    }
+    return null;
+  }
+  private canvasReferenceDims(): [number, number] | null {
+    return this.getCanvasReferenceDims();
+  }
+
+  private primaryActiveClip(): Clip | null {
+    for (const track of this.project.tracks) {
+      if (track.kind !== "video") continue;
+      const cid = this.activeByTrack.get(track.id);
+      if (cid) return this.clipById(cid);
+    }
+    return null;
+  }
+
+  private playAllActive(): void {
+    for (const clipId of this.activeByTrack.values()) {
+      const clip = this.clipById(clipId);
+      if (!clip) continue;
+      const v = this.videos.get(clip.sourceId);
+      if (v) void v.play().catch((err) => this.onError?.(err as Error));
+    }
+  }
+
+  private pauseAllActive(): void {
+    for (const clipId of this.activeByTrack.values()) {
+      const clip = this.clipById(clipId);
+      if (!clip) continue;
+      const v = this.videos.get(clip.sourceId);
+      if (v && !v.paused) v.pause();
+    }
   }
 
   private seekVideoToClipOffset(clip: Clip, offsetMs: Ms): void {
@@ -342,115 +467,239 @@ export class CanvasCompositorEngine implements PlaybackEngine {
       this.onEnded?.();
       return;
     }
-    const clip = this.clipAtTime(this.timeMs);
-    if (!clip) {
-      const next = this.nextClipAfterTime(this.timeMs);
-      if (next) {
-        this.timeMs = next.start;
-        this.activate(next);
-        this.seekVideoToClipOffset(next, 0);
-        const v = this.videos.get(next.sourceId);
-        if (v) void v.play().catch((err) => this.onError?.(err as Error));
+    // Detect clip-set changes across this tick.
+    const next = this.computeActiveClips();
+    let changed = next.size !== this.activeByTrack.size;
+    if (!changed) {
+      for (const [tid, cid] of next) {
+        if (this.activeByTrack.get(tid) !== cid) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (changed) this.refreshActive();
+    // Out of footage on every track? Skip ahead to the next clip
+    // start or end playback.
+    if (this.activeByTrack.size === 0) {
+      const nextStart = this.nextClipAfterTime(this.timeMs);
+      if (nextStart) {
+        this.timeMs = nextStart.start;
+        this.refreshActive();
       } else {
         this.pause();
         this.onEnded?.();
         return;
       }
-    } else if (clip.id !== this.currentClipId) {
-      this.activate(clip);
-      this.seekVideoToClipOffset(clip, this.timeMs - clip.start);
-      const v = this.videos.get(clip.sourceId);
-      if (v) void v.play().catch((err) => this.onError?.(err as Error));
     }
     this.onTimeUpdate?.(this.timeMs);
   }
 
   /**
-   * One paint per rAF — clears the canvas, draws the current active
-   * video frame letterboxed to fit, then refreshes the HUD. Done
-   * unconditionally (not just on `playing`) so the HUD frame counter
-   * and the seek preview both update when paused.
+   * One paint per rAF — clears the canvas, composites every active
+   * track's clip in reverse track order (so track 0 ends up on top),
+   * then refreshes the HUD. Done unconditionally (not just on
+   * `playing`) so the HUD frame counter and the seek preview both
+   * update when paused.
+   *
+   * Canvas dims (`dw, dh`) are computed once from the PRIMARY clip's
+   * source video — every lower-track clip then letterboxes inside
+   * the same canvas via its own contain-fit math. The output rect +
+   * content rect for the overlay both reflect the primary clip too
+   * (keyframe handles on PiP-overlaid clips are a v2 concern).
    */
   private paint(): void {
     const cw = this.canvas.width;
     const ch = this.canvas.height;
     this.ctx.clearRect(0, 0, cw, ch);
-    const clip = this.currentClipId ? this.clipById(this.currentClipId) : null;
-    const v = clip ? this.videos.get(clip.sourceId) : null;
-    if (v && v.videoWidth > 0 && v.videoHeight > 0 && clip) {
+
+    const primaryClip = this.primaryActiveClip();
+    const primaryVideo = primaryClip
+      ? this.videos.get(primaryClip.sourceId)
+      : null;
+    if (
+      !primaryClip ||
+      !primaryVideo ||
+      primaryVideo.videoWidth === 0 ||
+      primaryVideo.videoHeight === 0
+    ) {
+      this.frameRectsByClip.clear();
+      this.lastOutputRect = null;
+      this.primaryClipIdLastPaint = null;
+      this.updateBadge();
+      return;
+    }
+
+    // Canvas dims come from `getCanvasReferenceDims` — which prefers
+    // `project.output` (the authoritative authoring canvas, e.g.
+    // 1080×1920 for a 9:16 project) and falls back to the first clip
+    // on track 0 for legacy projects without `output`. NEVER use
+    // `parseAspect(project.aspect)` here — that returns the bare
+    // ratio numbers (9, 16) which would make `canvasScale = cw/9`
+    // huge, and any pan multiplied by that scale flings the content
+    // out of frame on the first cursor wiggle.
+    let aw: number;
+    let ah: number;
+    const ref = this.canvasReferenceDims();
+    if (ref) {
+      [aw, ah] = ref;
+    } else {
+      aw = primaryVideo.videoWidth;
+      ah = primaryVideo.videoHeight;
+    }
+    const canvasScale = Math.min(cw / aw, ch / ah);
+    const dw = aw * canvasScale;
+    const dh = ah * canvasScale;
+    const dpr = window.devicePixelRatio || 1;
+    const outX = (cw - dw) / 2;
+    const outY = (ch - dh) / 2;
+    const ccx = cw / 2;
+    const ccy = ch / 2;
+
+    // Z-order convention: tracks[0] paints FIRST (bottom) and the
+    // last track paints LAST (top). This matches Premiere / After
+    // Effects — uploads land on the first empty track, so the second
+    // upload (track 1) naturally becomes the PiP overlay sitting on
+    // top of the track-0 background. While painting, also cache each
+    // clip's post-transform content rect so the overlay can latch
+    // onto whichever clip the user selects.
+    this.frameRectsByClip.clear();
+    for (let i = 0; i < this.project.tracks.length; i++) {
+      const track = this.project.tracks[i]!;
+      if (track.kind !== "video") continue;
+      const clipId = this.activeByTrack.get(track.id);
+      if (!clipId) continue;
+      const clip = track.clips.find((c) => c.id === clipId);
+      if (!clip) continue;
+      const v = this.videos.get(clip.sourceId);
+      if (!v || v.videoWidth === 0 || v.videoHeight === 0) continue;
+
       const vw = v.videoWidth;
       const vh = v.videoHeight;
-      // Canvas size = Project.aspect when the user picked one;
-      // intrinsic video aspect otherwise.
-      const projAspect = parseAspect(this.project.aspect);
-      const [aw, ah] = projAspect ?? [vw, vh];
-      const canvasScale = Math.min(cw / aw, ch / ah);
-      const dw = aw * canvasScale; // output canvas dims (canvas px)
-      const dh = ah * canvasScale;
-      // Video letterboxes inside the canvas — contain math so a
-      // mismatched-aspect video sits centered with backdrop on either
-      // side. When canvas == video aspect (Original / matching pick)
-      // vidW/vidH collapse to dw/dh and behaviour matches before.
       const vidContain = Math.min(dw / vw, dh / vh);
       const vidW = vw * vidContain;
       const vidH = vh * vidContain;
-      const cx = cw / 2;
-      const cy = ch / 2;
-      // Compose keyframe transform on top of the centered letterbox.
-      // Identity transform (no keyframes / disabled) → math reduces to
-      // a plain centered drawImage, same as before.
-      // panX/panY are in CSS pixels (so "100" reads the same across
-      // DPR=1 and DPR=2 monitors). Multiply by DPR for the canvas
-      // coordinate space.
-      const dpr = window.devicePixelRatio || 1;
       const t = getEffectiveTransform(clip, this.timeMs - clip.start);
-      // Output frame in canvas pixels — fixed bounds we clip to so
-      // pan / zoom show the letterbox bg, not editor chrome.
-      const outX = (cw - dw) / 2;
-      const outY = (ch - dh) / 2;
+
+      // pan values are in CANVAS pixels (= units of `aw`/`ah`).
+      // Convert into preview-canvas backbuffer pixels by multiplying
+      // by `canvasScale` — that's the ratio of preview-canvas space
+      // per project-canvas unit.
       this.ctx.save();
       this.ctx.beginPath();
       this.ctx.rect(outX, outY, dw, dh);
       this.ctx.clip();
-      this.ctx.translate(cx + t.panX * dpr, cy + t.panY * dpr);
+      this.ctx.translate(
+        ccx + t.panX * canvasScale,
+        ccy + t.panY * canvasScale,
+      );
       this.ctx.scale(t.scale, t.scale);
       this.ctx.drawImage(v, -vidW / 2, -vidH / 2, vidW, vidH);
       this.ctx.restore();
-      this.paintedFrames += 1;
-      this.lastOutputRect = {
-        x: outX / dpr,
-        y: outY / dpr,
-        w: dw / dpr,
-        h: dh / dpr,
-      };
-      const cssCx = cw / (2 * dpr) + t.panX;
-      const cssCy = ch / (2 * dpr) + t.panY;
-      // Content rect tracks the VIDEO pixels (vidW/vidH), not the
-      // canvas — that's what the overlay's corner-scale handles
-      // attach to. The canvas itself is fixed (`lastOutputRect`).
+
+      // Cache this clip's content rect in CSS px for the overlay.
+      // CSS-px conversion: backbuffer / dpr; pan in canvas-px → CSS
+      // px = panX * canvasScale / dpr.
+      const cssCx = cw / (2 * dpr) + (t.panX * canvasScale) / dpr;
+      const cssCy = ch / (2 * dpr) + (t.panY * canvasScale) / dpr;
       const cssW = (vidW * t.scale) / dpr;
       const cssH = (vidH * t.scale) / dpr;
-      this.lastFrameRect = {
+      this.frameRectsByClip.set(clip.id, {
         x: cssCx - cssW / 2,
         y: cssCy - cssH / 2,
         w: cssW,
         h: cssH,
-      };
-    } else {
-      this.lastFrameRect = null;
-      this.lastOutputRect = null;
+      });
     }
+    this.paintedFrames += 1;
+    this.primaryClipIdLastPaint = primaryClip.id;
+
+    this.lastOutputRect = {
+      x: outX / dpr,
+      y: outY / dpr,
+      w: dw / dpr,
+      h: dh / dpr,
+    };
     this.updateBadge();
   }
 
-  getOutputFrameRect():
-    | { x: number; y: number; w: number; h: number }
-    | null {
+  getOutputFrameRect(
+    _clipId?: string,
+  ): { x: number; y: number; w: number; h: number } | null {
+    // The output canvas is the same for every clip on the same paint
+    // pass, so `_clipId` is just for API symmetry.
     return this.lastOutputRect;
   }
 
-  getFrameRect(): { x: number; y: number; w: number; h: number } | null {
-    return this.lastFrameRect;
+  getFrameRect(
+    clipId?: string,
+  ): { x: number; y: number; w: number; h: number } | null {
+    const id = clipId ?? this.primaryClipIdLastPaint;
+    if (id == null) return null;
+    // Compute on demand from the LIVE project state instead of
+    // returning the paint-cache value. Paint runs in its own rAF
+    // tick, so the overlay was reading a frame rect that lagged the
+    // actual project by one tick — which manifested as a brief
+    // "jump" of the dashed selection border when a drag updated
+    // scale + panX in the same tick. Recomputing here keeps the
+    // overlay in lockstep with the keyframe model.
+    const live = this.computeFrameRect(id);
+    return live ?? this.frameRectsByClip.get(id) ?? null;
+  }
+
+  /**
+   * Compute a clip's content rect (CSS px in host coords) from the
+   * LIVE project state — no paint cache involvement. Mirrors the
+   * math in `paint()` so visible canvas pixels and overlay handles
+   * agree to within float precision.
+   */
+  private computeFrameRect(
+    clipId: string,
+  ): { x: number; y: number; w: number; h: number } | null {
+    let clip: Clip | null = null;
+    for (const track of this.project.tracks) {
+      const c = track.clips.find((cc) => cc.id === clipId);
+      if (c) {
+        clip = c;
+        break;
+      }
+    }
+    if (!clip) return null;
+    const v = this.videos.get(clip.sourceId);
+    if (!v || v.videoWidth === 0 || v.videoHeight === 0) return null;
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+    if (cw === 0 || ch === 0) return null;
+    // Same canonical canvas dims as paint() — see the note there.
+    let aw: number;
+    let ah: number;
+    const ref = this.canvasReferenceDims();
+    if (ref) {
+      [aw, ah] = ref;
+    } else {
+      aw = v.videoWidth;
+      ah = v.videoHeight;
+    }
+    const canvasScale = Math.min(cw / aw, ch / ah);
+    const dw = aw * canvasScale;
+    const dh = ah * canvasScale;
+    const dpr = window.devicePixelRatio || 1;
+    const vidContain = Math.min(dw / v.videoWidth, dh / v.videoHeight);
+    const vidW = v.videoWidth * vidContain;
+    const vidH = v.videoHeight * vidContain;
+    const t = getEffectiveTransform(clip, this.timeMs - clip.start);
+    // panX/panY are in CANVAS pixels — convert to CSS px via
+    // `canvasScale / dpr` to match the paint() math.
+    const cssCx = cw / (2 * dpr) + (t.panX * canvasScale) / dpr;
+    const cssCy = ch / (2 * dpr) + (t.panY * canvasScale) / dpr;
+    const cssW = (vidW * t.scale) / dpr;
+    const cssH = (vidH * t.scale) / dpr;
+    return {
+      x: cssCx - cssW / 2,
+      y: cssCy - cssH / 2,
+      w: cssW,
+      h: cssH,
+    };
   }
 
   private updateBadge(): void {

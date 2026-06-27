@@ -49,7 +49,17 @@ export interface HitContext {
 
 /** Pixel half-width of the keyframe diamond hit zone — generous so a
  *  small target is easy to grab even at low zoom. */
-const KEYFRAME_HIT_RADIUS = 8;
+/**
+ * Hit radius for keyframe diamonds. Visual diamond is 10×10 px, so a
+ * 12 px radius makes the kf reliably grabbable even when the cursor
+ * lands a few px off-center — without it, a near-miss click slips
+ * through to clip-drag and the user thinks "the diamond vanished
+ * when I tried to drag it" (the dim source clip used to skip drawing
+ * its keyframes, compounding the perception). Compromise: trim
+ * handles get crowded out a little further, but trim is its own
+ * dedicated edge with bigger hit zones.
+ */
+const KEYFRAME_HIT_RADIUS = 12;
 
 /**
  * Pixel → semantic target. Branches in roughly this order:

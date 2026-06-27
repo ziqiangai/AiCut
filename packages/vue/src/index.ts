@@ -2,12 +2,14 @@ export { default as VideoEditor } from "./VideoEditor.vue";
 export { default as Timeline } from "./Timeline.vue";
 export type {
   Project,
+  ProjectOutput,
   MediaSource,
   Track,
   Clip,
   Keyframe,
   Ms,
   Theme,
+  AspectRatio,
   EditorApi,
   TimelineOptions,
   Locale,
@@ -20,6 +22,8 @@ export type {
 export {
   createEmptyProject,
   createId,
+  DEFAULT_OUTPUT_DIMS,
+  defaultOutputForAspect,
   localeEn,
   localeZh,
   HtmlVideoEngine,

@@ -155,23 +155,36 @@ test.describe("README screenshots", () => {
     await seed(page);
     // Don't isolate — we want to show the in-flight progress UI which
     // lives in the sidebar. Just narrow to the relevant block.
-    const export_btn = page.getByTestId("demo-export");
-    await export_btn.click();
+    // Open the popover → confirm; the popover lives off the header
+    // "Export" button now, not a sidebar button.
+    await page.getByTestId("demo-header-export").click();
+    await page.getByTestId("demo-export-confirm").click();
     await page.waitForSelector('[data-testid="demo-export-status"] progress', {
       timeout: 5_000,
     });
     const status = page.locator('[data-testid="demo-export-status"]');
+    // Scroll the status block into the viewport before clipping — the
+    // sidebar is long and the export-status div sits well below the
+    // initial viewport, so `boundingBox()` returns coords outside the
+    // screenshot canvas and the clip silently empties out.
+    await status.scrollIntoViewIfNeeded();
     const box = await status.boundingBox();
     if (!box) throw new Error("export status not visible");
     const pad = 12;
+    const viewport = page.viewportSize();
+    const clip = {
+      x: Math.max(0, box.x - pad),
+      y: Math.max(0, box.y - pad),
+      width: box.width + pad * 2,
+      height: box.height + pad * 2,
+    };
+    if (viewport) {
+      clip.width = Math.min(clip.width, viewport.width - clip.x);
+      clip.height = Math.min(clip.height, viewport.height - clip.y);
+    }
     await page.screenshot({
       path: path.join(SCREENSHOTS_DIR, "export-progress.png"),
-      clip: {
-        x: Math.max(0, box.x - pad),
-        y: Math.max(0, box.y - pad),
-        width: box.width + pad * 2,
-        height: box.height + pad * 2,
-      },
+      clip,
     });
   });
 

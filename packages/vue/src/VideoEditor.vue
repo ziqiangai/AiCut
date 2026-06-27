@@ -7,6 +7,7 @@ import {
   type Locale,
   type Ms,
   type PlaybackEngineFactory,
+  type PreviewLayout,
   type Project,
   type Theme,
 } from "@aicut/core";
@@ -65,12 +66,32 @@ const props = defineProps<{
    */
   previewFrame?: { enabled?: boolean };
   /**
+   * Multi-track picture-in-picture compositing in the preview. Off
+   * by default. Reactive — set `{ enabled: true }` to composite
+   * every video track's active clip with track `0` on top. Audio
+   * policy: only top track unmuted; lower tracks mute.
+   */
+  pictureInPicture?: { enabled?: boolean; toolbarAdd?: boolean };
+  /**
    * Built-in aspect-ratio picker (CapCut-style 比例 dropdown). Reactive
    * — set `{ enabled: true }` to surface the chip at the left of the
    * toolbar. Listen for `aspectChange` to drive your preview letterbox
    * / export defaults.
    */
   aspect?: { enabled?: boolean };
+  /**
+   * Picks how the preview area sits in the row below the header.
+   * `"centered"` (default) pins it to the middle third (CapCut-desktop
+   * style) with `panelLeft` / `panelRight` slots flanking it.
+   * `"fullWidth"` spans the row with no side columns. Reactive.
+   */
+  previewLayout?: PreviewLayout;
+  /**
+   * Minimum pixel gap between timeline ruler major ticks. Default 80;
+   * lower (~50) packs labels denser, higher (~140) spaces them out.
+   * Reactive — change anytime to retune density.
+   */
+  rulerMinTickPx?: number;
 }>();
 
 const emit = defineEmits<{
@@ -86,6 +107,7 @@ const emit = defineEmits<{
     target: { clipId: string; keyframeId: string } | null,
   ): void;
   (e: "aspectChange", aspect: AspectRatio | null): void;
+  (e: "pictureInPictureAddRequested"): void;
   (e: "error", error: Error): void;
 }>();
 
@@ -97,6 +119,10 @@ const offs: Array<() => void> = [];
  *  `#headerLeft` / `#headerRight` portal whatever the host provides. */
 const headerLeftSlot = ref<HTMLElement | null>(null);
 const headerRightSlot = ref<HTMLElement | null>(null);
+/** Side-panel slot DOM nodes — visible only when
+ *  `previewLayout === "centered"`. */
+const panelLeftSlot = ref<HTMLElement | null>(null);
+const panelRightSlot = ref<HTMLElement | null>(null);
 
 onMounted(() => {
   if (!host.value) return;
@@ -116,7 +142,16 @@ onMounted(() => {
     ...(props.previewFrame != null
       ? { previewFrame: props.previewFrame }
       : {}),
+    ...(props.pictureInPicture != null
+      ? { pictureInPicture: props.pictureInPicture }
+      : {}),
     ...(props.aspect != null ? { aspect: props.aspect } : {}),
+    ...(props.previewLayout != null
+      ? { previewLayout: props.previewLayout }
+      : {}),
+    ...(props.rulerMinTickPx != null
+      ? { rulerMinTickPx: props.rulerMinTickPx }
+      : {}),
   });
 
   offs.push(
@@ -132,11 +167,16 @@ onMounted(() => {
       emit("keyframeSelectionChange", target),
     ),
     editor.on("aspectChange", ({ aspect }) => emit("aspectChange", aspect)),
+    editor.on("requestPictureInPictureAdd", () =>
+      emit("pictureInPictureAddRequested"),
+    ),
     editor.on("error", ({ error }) => emit("error", error)),
   );
 
   headerLeftSlot.value = editor.headerLeft;
   headerRightSlot.value = editor.headerRight;
+  panelLeftSlot.value = editor.panelLeft;
+  panelRightSlot.value = editor.panelRight;
   emit("ready", editor);
 });
 
@@ -190,6 +230,18 @@ watch(
   },
 );
 
+// Reactive — flip multi-track PiP compositing.
+watch(
+  () => props.pictureInPicture?.enabled,
+  (enabled) => {
+    if (!editor) return;
+    const desired = enabled === true;
+    if (editor.isPictureInPictureEnabled() !== desired) {
+      editor.setPictureInPictureEnabled(desired);
+    }
+  },
+);
+
 // Reactive — flip built-in aspect picker visibility.
 watch(
   () => props.aspect?.enabled,
@@ -199,6 +251,25 @@ watch(
     if (editor.isAspectEnabled() !== desired) {
       editor.setAspectEnabled(desired);
     }
+  },
+);
+
+// Reactive — swap preview layout (fullWidth ↔ centered).
+watch(
+  () => props.previewLayout,
+  (layout) => {
+    if (!editor || layout == null) return;
+    if (editor.getPreviewLayout() !== layout) {
+      editor.setPreviewLayout(layout);
+    }
+  },
+);
+
+watch(
+  () => props.rulerMinTickPx,
+  (px) => {
+    if (!editor || px == null) return;
+    if (editor.getRulerMinTickPx() !== px) editor.setRulerMinTickPx(px);
   },
 );
 
@@ -227,6 +298,8 @@ onBeforeUnmount(() => {
   editor = null;
   headerLeftSlot.value = null;
   headerRightSlot.value = null;
+  panelLeftSlot.value = null;
+  panelRightSlot.value = null;
 });
 
 defineExpose({
@@ -242,6 +315,12 @@ defineExpose({
     </Teleport>
     <Teleport v-if="headerRightSlot" :to="headerRightSlot">
       <slot name="headerRight" />
+    </Teleport>
+    <Teleport v-if="panelLeftSlot" :to="panelLeftSlot">
+      <slot name="panelLeft" />
+    </Teleport>
+    <Teleport v-if="panelRightSlot" :to="panelRightSlot">
+      <slot name="panelRight" />
     </Teleport>
   </div>
 </template>

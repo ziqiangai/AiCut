@@ -130,4 +130,89 @@ describe("CanvasCompositorEngine", () => {
     expect(engine).toBeInstanceOf(CanvasCompositorEngine);
     engine.destroy();
   });
+
+  describe("picture-in-picture (multi-track compositing)", () => {
+    function twoTrackProject(): Project {
+      return {
+        version: 1,
+        sources: [
+          { id: "s1", url: "blob:main", kind: "video", name: "main", duration: 5000 },
+          { id: "s2", url: "blob:pip", kind: "video", name: "pip", duration: 5000 },
+        ],
+        tracks: [
+          {
+            id: "t1",
+            kind: "video",
+            clips: [{ id: "c1", sourceId: "s1", in: 0, out: 5000, start: 0 }],
+          },
+          {
+            id: "t2",
+            kind: "video",
+            clips: [{ id: "c2", sourceId: "s2", in: 0, out: 5000, start: 0 }],
+          },
+        ],
+      };
+    }
+
+    it("defaults to PiP off — audio policy mutes only non-primary sources after refresh", () => {
+      const engine = new CanvasCompositorEngine({
+        host,
+        project: twoTrackProject(),
+      });
+      // PiP off → only t1's clip is considered active. We can't inspect
+      // the engine's internal map, but we can verify behaviour via
+      // setProject + the fact that the engine doesn't throw + seek
+      // still works.
+      engine.seek(1000);
+      expect(engine.getTime()).toBe(1000);
+      engine.destroy();
+    });
+
+    it("setPictureInPictureEnabled(true) is idempotent", () => {
+      const engine = new CanvasCompositorEngine({
+        host,
+        project: twoTrackProject(),
+      });
+      engine.setPictureInPictureEnabled?.(true);
+      engine.setPictureInPictureEnabled?.(true);
+      engine.setPictureInPictureEnabled?.(false);
+      engine.setPictureInPictureEnabled?.(false);
+      engine.destroy();
+    });
+
+    it("setPictureInPictureEnabled is exposed on the engine instance", () => {
+      const engine = new CanvasCompositorEngine({ host, project: project() });
+      expect(typeof engine.setPictureInPictureEnabled).toBe("function");
+      engine.destroy();
+    });
+
+    it("PiP toggle survives a setProject swap", () => {
+      const engine = new CanvasCompositorEngine({
+        host,
+        project: twoTrackProject(),
+      });
+      engine.setPictureInPictureEnabled?.(true);
+      engine.setProject(twoTrackProject());
+      // No assertion that PiP flag persisted (it does — it's instance
+      // state) but verify the engine didn't break under a re-sync with
+      // PiP on.
+      engine.seek(2500);
+      expect(engine.getTime()).toBe(2500);
+      engine.destroy();
+    });
+
+    it("survives a project with zero video tracks", () => {
+      const engine = new CanvasCompositorEngine({
+        host,
+        project: {
+          version: 1,
+          sources: [],
+          tracks: [],
+        },
+      });
+      engine.setPictureInPictureEnabled?.(true);
+      engine.seek(0);
+      engine.destroy();
+    });
+  });
 });

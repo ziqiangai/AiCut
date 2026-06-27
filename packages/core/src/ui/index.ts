@@ -5,12 +5,13 @@ import {
   findTrackOfClip,
   frameStepMs,
 } from "../model.js";
-import type { Editor } from "../editor.js";
+import type { Editor, PreviewLayout } from "../editor.js";
 import { Timeline } from "../timeline/index.js";
 import type { Clip, Ms } from "../types.js";
 import type { Locale } from "../i18n.js";
 import { KeyframeOverlay } from "./keyframe-overlay.js";
 import { KeyframePanel } from "./keyframe-panel.js";
+import { PreviewControls } from "./preview-controls.js";
 import { Toolbar, type ToolbarCallbacks } from "./toolbar.js";
 
 /**
@@ -20,6 +21,10 @@ import { Toolbar, type ToolbarCallbacks } from "./toolbar.js";
  * routing centralised in `Editor.moveClip`).
  */
 export interface UICallbacks extends ToolbarCallbacks {
+  /** Play/pause toggle — wired into the preview-overlay play button. */
+  onPlayToggle: () => void;
+  /** Fullscreen toggle — wired into the preview-overlay fullscreen button. */
+  onFullscreen: () => void;
   onSeek: (timeMs: Ms) => void;
   onSelectClip: (clipId: string | null) => void;
   onDeleteClip: (clipId: string) => void;
@@ -55,7 +60,19 @@ export class EditorUI {
   readonly headerLeft: HTMLDivElement;
   /** Host-extensible slot at the very right of the editor header. */
   readonly headerRight: HTMLDivElement;
+  /** Wrapping element below the header that holds the side panels +
+   *  preview. Becomes a 3-column grid when previewLayout = centered. */
+  private main: HTMLDivElement;
+  /** Side panel slot to the left of the preview. Visible only when
+   *  previewLayout = centered. */
+  readonly panelLeft: HTMLDivElement;
+  /** Side panel slot to the right of the preview. */
+  readonly panelRight: HTMLDivElement;
+  /** The "card" wrapping the video viewport + playback footer. Width
+   *  is capped via CSS; height auto-fits via the host's aspect ratio. */
+  private previewCard: HTMLDivElement;
   private preview: HTMLDivElement;
+  private previewControls: PreviewControls;
   private fullscreenExitBtn: HTMLButtonElement;
   private toolbar: Toolbar;
   private timelineHost: HTMLDivElement;
@@ -87,10 +104,33 @@ export class EditorUI {
     this.header.append(this.headerLeft, this.headerRight);
     root.appendChild(this.header);
 
+    // Main area below the header. In fullWidth layout it's a single
+    // cell holding the preview; in centered layout it becomes a
+    // 3-column grid `panel-left | preview | panel-right`. CSS reads
+    // `data-preview-layout` on the editor root to switch templates.
+    this.main = document.createElement("div");
+    this.main.className = "aicut-main";
+    this.main.setAttribute("data-testid", "aicut-main");
+    this.panelLeft = document.createElement("div");
+    this.panelLeft.className = "aicut-panel aicut-panel-left";
+    this.panelLeft.setAttribute("data-testid", "aicut-panel-left");
+    this.panelRight = document.createElement("div");
+    this.panelRight.className = "aicut-panel aicut-panel-right";
+    this.panelRight.setAttribute("data-testid", "aicut-panel-right");
+
+    // Preview "card" — capped width, aspect-driven height, rounded
+    // surface that visually separates the viewport from the chrome
+    // around it. CapCut-desktop's preview area uses this same pattern:
+    // a fixed-width media frame with the playback strip as a footer
+    // beneath it, rather than overlaying the controls on top of the
+    // video where they can collide with the canvas / keyframe guides.
+    this.previewCard = document.createElement("div");
+    this.previewCard.className = "aicut-preview-card";
+    this.previewCard.setAttribute("data-testid", "aicut-preview-card");
+
     this.preview = document.createElement("div");
     this.preview.className = "aicut-preview-host";
     this.preview.setAttribute("data-testid", "aicut-preview");
-    root.appendChild(this.preview);
 
     this.fullscreenExitBtn = document.createElement("button");
     this.fullscreenExitBtn.type = "button";
@@ -103,7 +143,23 @@ export class EditorUI {
     );
     this.preview.appendChild(this.fullscreenExitBtn);
 
+    // Playback controls — time / play / duration / fullscreen — sit
+    // as a card footer beneath the viewport (CapCut-desktop style),
+    // not as an overlay on the video. Keeps the footer chrome from
+    // colliding with the canvas guide / keyframe handles inside the
+    // viewport.
+    this.previewControls = new PreviewControls(
+      { onPlayToggle: cb.onPlayToggle, onFullscreen: cb.onFullscreen },
+      locale,
+    );
+
+    this.previewCard.append(this.preview, this.previewControls.element);
+    this.main.append(this.panelLeft, this.previewCard, this.panelRight);
+    root.appendChild(this.main);
+
     this.toolbar = new Toolbar(root, cb, locale);
+    root.setAttribute("data-preview-layout", editor.getPreviewLayout());
+    this.applyAspect(editor.getAspect());
 
     this.timelineHost = document.createElement("div");
     this.timelineHost.className = "aicut-timeline";
@@ -119,6 +175,7 @@ export class EditorUI {
       snap: editor.getSnap(),
       autoFit: true,
       locale,
+      rulerMinTickPx: editor.getRulerMinTickPx(),
       keyframesEnabled: editor.isKeyframesEnabled(),
       selectedKeyframe: editor.getSelectedKeyframe(),
       onSeek: cb.onSeek,
@@ -152,9 +209,13 @@ export class EditorUI {
       },
     });
 
-    // Keyframe panel — floats over the preview's left edge; visible
-    // only when keyframes mode is on AND a keyframe is selected.
-    this.keyframePanel = new KeyframePanel(this.preview, editor, locale);
+    // Keyframe panel — mounts into the editor's left panel column so
+    // the numeric editor lives next to the preview rather than on top
+    // of it. Visible only when keyframes mode is on AND a keyframe is
+    // selected. In `fullWidth` layout the panelLeft column is hidden,
+    // so hosts who run that layout typically don't need this panel —
+    // dragging the in-preview overlay handles is enough.
+    this.keyframePanel = new KeyframePanel(this.panelLeft, editor, locale);
     // Keyframe overlay — frame border + scale handles on top of the
     // preview; drives drag-to-translate and corner-handle-to-scale
     // gestures via direct manipulation. Hidden when keyframes off.
@@ -227,9 +288,6 @@ export class EditorUI {
       kfEnabled,
     );
     this.toolbar.render({
-      playing: this.editor.isPlaying(),
-      time,
-      duration,
       canUndo: this.editor.canUndo(),
       canRedo: this.editor.canRedo(),
       canSplit: this.canSplitAt(time),
@@ -238,9 +296,21 @@ export class EditorUI {
       clipEdgeNavEnabled: this.editor.isClipEdgeNavEnabled(),
       aspectEnabled: this.editor.isAspectEnabled(),
       aspect: this.editor.getAspect(),
+      // Gate the toolbar "+ PiP" button on the master enable flag.
+      // When PiP is disabled there's no point adding overlay clips
+      // (they wouldn't paint), so the button stays hidden — same
+      // semantics CapCut surfaces in its sidebar PiP toggle.
+      pipToolbarAddEnabled:
+        this.editor.isPictureInPictureToolbarAddEnabled() &&
+        this.editor.isPictureInPictureEnabled(),
       snap,
       pxPerSec,
       ...kfState,
+    });
+    this.previewControls.render({
+      playing: this.editor.isPlaying(),
+      time,
+      duration,
     });
 
     this.timeline.setProject(project);
@@ -267,9 +337,6 @@ export class EditorUI {
       kfEnabled,
     );
     this.toolbar.render({
-      playing: this.editor.isPlaying(),
-      time: timeMs,
-      duration: this.editor.getDuration(),
       canUndo: this.editor.canUndo(),
       canRedo: this.editor.canRedo(),
       canSplit: this.canSplitAt(timeMs),
@@ -278,10 +345,42 @@ export class EditorUI {
       clipEdgeNavEnabled: this.editor.isClipEdgeNavEnabled(),
       aspectEnabled: this.editor.isAspectEnabled(),
       aspect: this.editor.getAspect(),
+      pipToolbarAddEnabled:
+        this.editor.isPictureInPictureToolbarAddEnabled() &&
+        this.editor.isPictureInPictureEnabled(),
       snap: this.editor.getSnap(),
       pxPerSec: this.editor.getScale(),
       ...kfState,
     });
+    this.previewControls.render({
+      playing: this.editor.isPlaying(),
+      time: timeMs,
+      duration: this.editor.getDuration(),
+    });
+  }
+
+  setPreviewLayout(layout: PreviewLayout): void {
+    this.root.setAttribute("data-preview-layout", layout);
+  }
+
+  setRulerMinTickPx(px: number): void {
+    this.timeline.setRulerMinTickPx(px);
+  }
+
+  /** Update the preview card's aspect-ratio so its height auto-fits
+   *  the chosen ratio. Called by Editor when the user picks a new
+   *  aspect (or clears to "Original"). */
+  setAspect(aspect: import("../types.js").AspectRatio | null): void {
+    this.applyAspect(aspect);
+  }
+
+  private applyAspect(aspect: import("../types.js").AspectRatio | null): void {
+    // "Original" (null) collapses to a sensible default — 16:9 is the
+    // overwhelming majority of source material; if the host wants
+    // something else they pick from the aspect chip.
+    const ratio = aspect ?? "16:9";
+    const [w, h] = ratio.split(":");
+    this.root.style.setProperty("--aicut-preview-aspect", `${w} / ${h}`);
   }
 
   /** Explicit re-fit — Editor calls this when a brand-new project replaces the current one. */
@@ -291,6 +390,7 @@ export class EditorUI {
 
   setLocale(locale: Locale): void {
     this.toolbar.setLocale(locale);
+    this.previewControls.setLocale(locale);
     this.fullscreenExitBtn.title = locale.exitFullscreenTitle;
     this.fullscreenExitBtn.textContent = locale.exitFullscreen;
     this.timeline.setLocale(locale);
@@ -304,11 +404,13 @@ export class EditorUI {
       this.onDocKeydown = null;
     }
     this.toolbar.destroy();
+    this.previewControls.destroy();
     this.timeline.destroy();
     this.keyframePanel.destroy();
     this.keyframeOverlay.destroy();
     this.root.innerHTML = "";
     this.root.classList.remove("aicut-root", "aicut-fullscreen");
+    this.root.removeAttribute("data-preview-layout");
   }
 
   // ---- helpers --------------------------------------------------------

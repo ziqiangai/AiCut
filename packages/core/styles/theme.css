@@ -85,41 +85,184 @@
   box-sizing: border-box;
 }
 
-/* ===== Preview ===== */
+/* ===== Main row (preview + optional side panels) ===== */
+
+/* Wrapper around the preview area. In the default `fullWidth` layout
+   it stretches edge-to-edge so legacy hosts see the same preview-
+   spanning-the-row behavior they always had. When the host sets
+   `previewLayout="centered"` it becomes a 3-column grid that pins the
+   preview to the middle third, mirroring CapCut-desktop's source/
+   media-bin → preview → effects/properties layout.
+   Each main-row child is explicitly grid-placed by column so toggling
+   a panel's display doesn't shift the preview into the wrong track. */
+.aicut-main {
+  display: grid;
+  grid-template-columns: 0 1fr 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.aicut-main > .aicut-panel-left   { grid-column: 1; }
+.aicut-main > .aicut-preview-card { grid-column: 2; }
+.aicut-main > .aicut-panel-right  { grid-column: 3; }
+
+.aicut-root[data-preview-layout="centered"] .aicut-main {
+  /* 1fr | 1fr | 1fr → preview gets exactly one third of the width.
+     Side panels share the remaining two thirds equally. */
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.aicut-panel {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--aicut-controls-bg);
+  color: var(--aicut-controls-text);
+}
+
+.aicut-panel-left,
+.aicut-panel-right {
+  /* No borders — the card and the panels read as separate "islands"
+     floating on the editor background. CapCut-desktop convention. */
+  padding: 16px;
+}
+
+/* In the default fullWidth layout the side columns collapse to 0
+   width — we keep the panels in the layout (visibility:hidden) so
+   grid-track-auto-placement isn't surprised when a panel is empty,
+   and React/Vue Teleports stay attached to a stable DOM node even
+   when the host toggles between layouts at runtime. */
+.aicut-root:not([data-preview-layout="centered"]) .aicut-panel {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ===== Preview card ===== */
+
+/* The preview lives inside a "card" so the viewport (video + canvas
+   guide + keyframe overlays) and the playback chrome (time / play /
+   duration / fullscreen) are visually paired but never overlap. Width
+   is capped to keep the viewport compact in wide editors; height is
+   driven by the host's aspect ratio so the dashed frame, the video,
+   and the footer all line up regardless of viewport size. */
+.aicut-preview-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  /* Tasteful upper bound — the card stops growing past this even when
+     the main row is much wider. Narrower than the full row so the
+     side-panel slots have room to breathe (CapCut-desktop convention:
+     viewport in the middle, source/properties on either side). Hosts
+     can override `--aicut-preview-max-width` to shrink/grow. */
+  max-width: var(--aicut-preview-max-width, 560px);
+  /* Stretch to the available row height (minus a thin breathing
+     margin top + bottom). Inside, the host absorbs the extra height
+     via `flex: 1 1 auto` so the card reads as a single tall island
+     instead of hugging the canvas-guide rectangle. */
+  height: calc(100% - 16px);
+  margin: 8px auto;
+  align-self: stretch;
+  border-radius: var(--aicut-radius-md, 12px);
+  overflow: hidden;
+  background: var(--aicut-preview-bg, #000);
+  border: 1px solid var(--aicut-controls-border, rgba(255, 255, 255, 0.08));
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  min-height: 0;
+}
 
 .aicut-preview-host {
   position: relative;
-  /* Letterbox color around the video. Defaults to black (the "film
-     editor" convention — videos look cleanest on neutral dark), but
-     hosts can override via `theme.previewBg` to follow their UI
-     surface in light themes. */
   background: var(--aicut-preview-bg, #000);
-  border-radius: 0;
+  /* Width fills the card column. Height stretches to fill the rest
+     of the card so the surface reads as a single tall panel even when
+     the chosen output aspect is narrower — the canvas guide drawn by
+     the playback engine inside still shows the actual output ratio
+     centered with letterbox. */
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
-  min-height: 220px;
 }
 
-/* Keyframe transform panel — floats on the preview's top-left when
-   keyframe mode is on AND a keyframe is selected. Adapts to the
-   editor theme via the same `--aicut-controls-*` tokens the rest of
-   the chrome uses, so dark / light / custom themes get a coherent
-   look without a separate "floating panel" palette. */
-.aicut-keyframe-panel {
+/* Footer playback strip — sits beneath the viewport inside the card.
+   Subtle separator + matching surface so the strip reads as part of
+   the card, not a stand-alone toolbar. */
+.aicut-preview-controls {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  /* Lock the footer's height so flex-shrink doesn't squash it when
+     the card has to fit a short row — the host above absorbs the
+     space pressure via its `flex: 1 1 auto` instead. */
+  flex: 0 0 40px;
+  padding: 0 14px;
+  background: var(--aicut-controls-bg, #1f1f22);
+  border-top: 1px solid var(--aicut-controls-border, rgba(255, 255, 255, 0.08));
+  color: var(--aicut-controls-text, rgba(255, 255, 255, 0.85));
+}
+
+/* Pull the fullscreen button OUT of the centered flex group so the
+   time / play / duration trio stays perfectly centered. Absolute-
+   positioned to the right edge; everything else (icon size, hover,
+   color) inherits from the .aicut-fullscreen rules below. */
+.aicut-preview-controls .aicut-fullscreen {
   position: absolute;
-  top: 12px;
-  left: 12px;
-  z-index: 4;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.aicut-preview-controls .aicut-time-current,
+.aicut-preview-controls .aicut-time-total {
+  min-width: 48px;
+  font-variant-numeric: tabular-nums;
+}
+
+.aicut-preview-controls .aicut-play-btn {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  color: var(--aicut-controls-text, rgba(255, 255, 255, 0.85));
+}
+
+.aicut-preview-controls .aicut-play-btn:not([data-state="playing"]):hover {
+  background: var(--aicut-controls-hover, rgba(255, 255, 255, 0.08));
+}
+
+.aicut-preview-controls .aicut-play-btn[data-state="playing"] {
+  background: var(--color-brand, #9a31f4);
+  color: #fff;
+}
+
+.aicut-preview-controls .aicut-fullscreen {
+  width: 28px;
+  height: 28px;
+}
+
+.aicut-preview-controls .aicut-fullscreen:hover:not(:disabled) {
+  background: var(--aicut-controls-hover, rgba(255, 255, 255, 0.08));
+}
+
+/* Keyframe transform panel — mounts into the editor's left panel
+   column (visible when keyframe mode is on AND a keyframe is
+   selected). Adapts to the editor theme via the same
+   `--aicut-controls-*` tokens the rest of the chrome uses, so dark /
+   light / custom themes get a coherent look without a separate
+   "floating panel" palette. */
+.aicut-keyframe-panel {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 188px;
+  width: 100%;
   padding: 12px 14px 10px;
   border-radius: 10px;
   background: var(--aicut-controls-bg, #1f1f22);
   color: var(--aicut-controls-text, rgba(255, 255, 255, 0.85));
   font: 12px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   border: 1px solid var(--aicut-controls-border, rgba(255, 255, 255, 0.08));
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
 }
 
 .aicut-keyframe-panel__title {
@@ -398,13 +541,24 @@
   z-index: 3;
 }
 
+.aicut-keyframe-overlay__canvas-guide {
+  position: absolute;
+  border: 1.5px dashed
+    color-mix(in srgb, var(--color-brand, #9a31f4) 65%, transparent);
+  background: transparent;
+  /* Always passive — the canvas guide is purely informational. The
+     selection frame below is what captures pan / scale drags. */
+  pointer-events: none;
+  cursor: default;
+  box-sizing: border-box;
+}
+
 .aicut-keyframe-overlay__frame {
   position: absolute;
   border: 1.5px dashed var(--color-brand, #9a31f4);
   background: transparent;
-  /* Passive by default — frame is a pure outline that visualises the
-     output canvas. Without --interactive, clicks fall through to the
-     preview so the user can still interact with whatever lives below. */
+  /* Passive by default — selecting a clip outlines it but doesn't
+     necessarily mean "drag-to-edit". Keyframes mode flips this on. */
   pointer-events: none;
   cursor: default;
   box-sizing: border-box;
@@ -465,6 +619,31 @@
   cursor: nesw-resize;
 }
 
+/* Edge midpoint handles — slimmer rectangles so they read as "edge
+   grip" instead of "corner grip", and so they don't visually fight
+   the corner handles when they sit close together on a small PiP. */
+.aicut-keyframe-overlay__handle--edge {
+  width: 18px;
+  height: 6px;
+  border-radius: 4px;
+}
+
+.aicut-keyframe-overlay__handle--l,
+.aicut-keyframe-overlay__handle--r {
+  width: 6px;
+  height: 18px;
+}
+
+.aicut-keyframe-overlay__handle--t,
+.aicut-keyframe-overlay__handle--b {
+  cursor: ns-resize;
+}
+
+.aicut-keyframe-overlay__handle--l,
+.aicut-keyframe-overlay__handle--r {
+  cursor: ew-resize;
+}
+
 .aicut-fullscreen-exit {
   position: absolute;
   top: 16px;
@@ -492,11 +671,21 @@
      we lift just the preview to viewport-cover. */
 }
 
-.aicut-root.aicut-fullscreen .aicut-preview-host {
+.aicut-root.aicut-fullscreen .aicut-preview-card {
   position: fixed;
   inset: 0;
   z-index: 9999;
-  min-height: 0;
+  max-width: none;
+  margin: 0;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  background: #000;
+}
+
+.aicut-root.aicut-fullscreen .aicut-preview-host {
+  flex: 1 1 auto;
+  aspect-ratio: auto;
   background: #000;
 }
 
@@ -540,7 +729,7 @@
 /* Pin each editor surface to its intended row. Required so the four
    children can't auto-reflow when one (e.g. the header) is hidden. */
 .aicut-root > .aicut-header        { grid-row: 1; }
-.aicut-root > .aicut-preview-host  { grid-row: 2; }
+.aicut-root > .aicut-main          { grid-row: 2; }
 .aicut-root > .aicut-toolbar       { grid-row: 3; }
 .aicut-root > .aicut-timeline      { grid-row: 4; }
 

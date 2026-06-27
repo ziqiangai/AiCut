@@ -53,6 +53,13 @@ export interface TimelineOptions {
   selectedClipId?: string | null;
   /** Show the track-name header column (left). Default true. */
   showHeader?: boolean;
+  /**
+   * Minimum pixel gap between ruler major ticks. Drives the auto
+   * picker via `niceTickSeconds(minPx / pxPerSec)` — smaller values
+   * pack more labels per zoom level, larger values space them out.
+   * Default 80; sensible range ~40–160.
+   */
+  rulerMinTickPx?: number;
   /** Disable interactions — useful for read-only preview / frame picker. */
   readOnly?: boolean;
   /** Snap to clip edges + playhead when dragging. Default true. */
@@ -197,6 +204,7 @@ export class Timeline {
   private readOnly: boolean;
   private autoFitEnabled: boolean;
   private locale: Locale;
+  private rulerMinTickPx: number;
   private keyframesEnabled = false;
   private selectedKeyframe:
     | { clipId: string; keyframeId: string }
@@ -272,6 +280,7 @@ export class Timeline {
     this.readOnly = opts.readOnly === true;
     this.autoFitEnabled = opts.autoFit !== false;
     this.locale = mergeLocale(opts.locale);
+    this.rulerMinTickPx = opts.rulerMinTickPx ?? 80;
     this.keyframesEnabled = opts.keyframesEnabled === true;
     this.selectedKeyframe = opts.selectedKeyframe ?? null;
 
@@ -413,6 +422,12 @@ export class Timeline {
 
   setLocale(locale: Partial<Locale>): void {
     this.locale = mergeLocale(locale);
+    this.scheduleRender();
+  }
+
+  setRulerMinTickPx(px: number): void {
+    if (px === this.rulerMinTickPx) return;
+    this.rulerMinTickPx = Math.max(20, Math.round(px));
     this.scheduleRender();
   }
 
@@ -667,6 +682,7 @@ export class Timeline {
       scrollbarActiveY: this.scrollbarDrag?.axis === "v",
       scrollbarActiveX: this.scrollbarDrag?.axis === "h",
       locale: this.locale,
+      rulerMinTickPx: this.rulerMinTickPx,
       keyframesEnabled: this.keyframesEnabled,
       selectedKeyframe: this.selectedKeyframe,
       hoveredKeyframe: this.hoveredKeyframe,

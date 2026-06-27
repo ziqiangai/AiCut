@@ -15,6 +15,7 @@ import {
   type Locale,
   type Ms,
   type PlaybackEngineFactory,
+  type PreviewLayout,
   type Project,
   type Theme,
 } from "@aicut/core";
@@ -70,6 +71,25 @@ export interface VideoEditorProps {
   headerLeft?: ReactNode;
   /** Right side of the editor header — conventionally Share / Export / profile. */
   headerRight?: ReactNode;
+  /**
+   * Picks how the preview area sits in the row below the header.
+   * - `"fullWidth"` (default): preview spans the entire row — same as
+   *   today's chrome.
+   * - `"centered"`: preview pins to the middle third (CapCut-desktop
+   *   style), with `panelLeft` / `panelRight` slots flanking it.
+   *
+   * Reactive — swap any time without remount.
+   */
+  previewLayout?: PreviewLayout;
+  /**
+   * Rendered into the left column of the main row when
+   * `previewLayout === "centered"`. The library reserves the column
+   * box; if you pass nothing it stays empty. In `fullWidth` layout
+   * the slot is hidden via CSS so the preview occupies the full row.
+   */
+  panelLeft?: ReactNode;
+  /** Right-of-preview column slot — mirror of `panelLeft`. */
+  panelRight?: ReactNode;
 
   /**
    * Initial-only — picks the playback engine used by the underlying
@@ -96,6 +116,14 @@ export interface VideoEditorProps {
    */
   timelineHeight?: number;
   /**
+   * Minimum pixel gap between timeline ruler major ticks. The library
+   * picks the "nicest" interval (1s, 0.5s, 0.2s, …) that keeps majors
+   * at least this far apart for the current zoom. Default 80; lower
+   * (~50) packs labels denser, higher (~140) spaces them out.
+   * Reactive — change anytime to retune density without remount.
+   */
+  rulerMinTickPx?: number;
+  /**
    * Per-clip keyframe animation (X / Y / Scale). Reactive — set
    * `{ enabled: true }` to surface keyframe diamonds on the timeline
    * and route the canvas-based engines through the transform pipeline.
@@ -118,6 +146,33 @@ export interface VideoEditorProps {
    * fall through to the page.
    */
   clipEdgeNav?: { enabled?: boolean };
+  /**
+   * Multi-track picture-in-picture compositing in the preview. Off
+   * by default (today's single-clip behaviour). Reactive — flip
+   * `enabled: true` to make every video track's currently-active
+   * clip paint at the playhead, with track `0` on top.
+   *
+   * Audio policy: only the top track's clip stays unmuted; lower
+   * tracks mute. Same-source caveat: a single decoder per source
+   * means a clip on two tracks plays from one currentTime only —
+   * upload the file twice for separate ids if you need both ends
+   * playing independently.
+   *
+   * `toolbarAdd: true` surfaces a built-in "+ PiP overlay" icon
+   * button next to the keyframe affordance. Clicking it fires
+   * `onPictureInPictureAddRequested` — the LIBRARY doesn't run an
+   * upload itself; the host wires up its own file picker / upload
+   * pipeline and inserts the resulting clip wherever fits.
+   */
+  pictureInPicture?: {
+    enabled?: boolean;
+    toolbarAdd?: boolean;
+  };
+  /** Fires when the user clicks the built-in "+ PiP overlay"
+   *  toolbar button (only present when `pictureInPicture.toolbarAdd`
+   *  is true). Host should open a file picker, upload, and create
+   *  a new clip on an overlay track. */
+  onPictureInPictureAddRequested?: () => void;
   /**
    * Dashed outline of the output canvas on top of the preview.
    * Defaults to `{ enabled: true }` — the frame is purely visual
@@ -161,6 +216,8 @@ export function VideoEditor(props: VideoEditorProps) {
     right: HTMLElement;
     headerLeft: HTMLElement;
     headerRight: HTMLElement;
+    panelLeft: HTMLElement;
+    panelRight: HTMLElement;
   } | null>(null);
 
   // Latest-callback refs so the effect that creates the editor doesn't
@@ -196,8 +253,17 @@ export function VideoEditor(props: VideoEditorProps) {
       ...(cbRef.current.previewFrame != null
         ? { previewFrame: cbRef.current.previewFrame }
         : {}),
+      ...(cbRef.current.pictureInPicture != null
+        ? { pictureInPicture: cbRef.current.pictureInPicture }
+        : {}),
       ...(cbRef.current.aspect != null
         ? { aspect: cbRef.current.aspect }
+        : {}),
+      ...(cbRef.current.previewLayout != null
+        ? { previewLayout: cbRef.current.previewLayout }
+        : {}),
+      ...(cbRef.current.rulerMinTickPx != null
+        ? { rulerMinTickPx: cbRef.current.rulerMinTickPx }
         : {}),
     });
     editorRef.current = editor;
@@ -206,6 +272,8 @@ export function VideoEditor(props: VideoEditorProps) {
       right: editor.toolbarRight,
       headerLeft: editor.headerLeft,
       headerRight: editor.headerRight,
+      panelLeft: editor.panelLeft,
+      panelRight: editor.panelRight,
     });
 
     const offs = [
@@ -222,6 +290,9 @@ export function VideoEditor(props: VideoEditorProps) {
       ),
       editor.on("aspectChange", ({ aspect }) =>
         cbRef.current.onAspectChange?.(aspect),
+      ),
+      editor.on("requestPictureInPictureAdd", () =>
+        cbRef.current.onPictureInPictureAddRequested?.(),
       ),
       editor.on("error", ({ error }) => cbRef.current.onError?.(error)),
     ];
@@ -283,11 +354,38 @@ export function VideoEditor(props: VideoEditorProps) {
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
+    const desired = props.pictureInPicture?.enabled === true;
+    if (editor.isPictureInPictureEnabled() !== desired) {
+      editor.setPictureInPictureEnabled(desired);
+    }
+  }, [props.pictureInPicture?.enabled]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
     const desired = props.aspect?.enabled === true;
     if (editor.isAspectEnabled() !== desired) {
       editor.setAspectEnabled(desired);
     }
   }, [props.aspect?.enabled]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (props.previewLayout == null) return;
+    if (editor.getPreviewLayout() !== props.previewLayout) {
+      editor.setPreviewLayout(props.previewLayout);
+    }
+  }, [props.previewLayout]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    if (props.rulerMinTickPx == null) return;
+    if (editor.getRulerMinTickPx() !== props.rulerMinTickPx) {
+      editor.setRulerMinTickPx(props.rulerMinTickPx);
+    }
+  }, [props.rulerMinTickPx]);
 
   // Reactive — the underlying CSS custom property can be updated on
   // the container any time; the timeline picks up the new height
@@ -334,6 +432,12 @@ export function VideoEditor(props: VideoEditorProps) {
         : null}
       {slots && props.headerRight != null
         ? createPortal(props.headerRight, slots.headerRight)
+        : null}
+      {slots && props.panelLeft != null
+        ? createPortal(props.panelLeft, slots.panelLeft)
+        : null}
+      {slots && props.panelRight != null
+        ? createPortal(props.panelRight, slots.panelRight)
         : null}
     </div>
   );

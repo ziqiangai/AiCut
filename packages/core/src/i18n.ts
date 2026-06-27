@@ -35,6 +35,10 @@ export interface Locale {
   /** Toolbar tooltip — jump the playhead to the selected clip's end. */
   seekClipEnd: string;
 
+  /** Toolbar tooltip — "+ PiP overlay" action button (host's file
+   *  picker takes over on click). */
+  pipAdd: string;
+
   // Aspect-ratio picker (built-in, opt-in via aspect.enabled)
   /** Toolbar button tooltip — opens the aspect picker popover. */
   aspectTitle: string;
@@ -104,6 +108,7 @@ export const localeEn: Locale = {
   keyframeRemove: "Remove keyframe at playhead",
   seekClipStart: "Jump to clip start (I)",
   seekClipEnd: "Jump to clip end (O)",
+  pipAdd: "Add picture-in-picture overlay",
   aspectTitle: "Aspect ratio",
   aspectMenuLabel: "Aspect ratio",
   aspectOriginal: "Original",
@@ -149,6 +154,7 @@ export const localeZh: Locale = {
   keyframeRemove: "删除当前关键帧",
   seekClipStart: "跳到片段起点 (I)",
   seekClipEnd: "跳到片段末尾 (O)",
+  pipAdd: "添加画中画",
   aspectTitle: "比例",
   aspectMenuLabel: "画面比例",
   aspectOriginal: "原始",

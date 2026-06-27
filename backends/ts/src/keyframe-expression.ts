@@ -2,34 +2,42 @@ import type { EasingKind, Keyframe, KeyframeProp } from "@aicut/core";
 
 /**
  * Compile a per-property keyframe array into an ffmpeg filter
- * expression in `t` (output stream timestamp, seconds). The result is
- * suitable to drop into `scale=w='...':h='...':eval=frame` or
- * `overlay=x='...':eval=frame` — both filters expose `t` as the
- * current output timestamp.
+ * expression. The result is suitable to drop into
+ * `scale=w='...':h='...':eval=frame` or `overlay=x='...':eval=frame`
+ * — both filters expose `t` as the current OUTPUT timestamp.
  *
  * Math: each segment between kf[i] and kf[i+1] contributes
  *
- *   gte(t, A) * lt(t, B) * ( a.value + easedT * (b.value - a.value) )
+ *   gte(T, A) * lt(T, B) * ( a.value + easedT * (b.value - a.value) )
  *
- * where easedT applies the LEAVING keyframe's outgoing curve to the
- * normalized progress `(t - A)/(B - A)`. Before-first holds the
+ * where `T` is the time-variable expression (default `t`) and
+ * easedT applies the LEAVING keyframe's outgoing curve to the
+ * normalized progress `(T - A)/(B - A)`. Before-first holds the
  * first value; after-last holds the last value. Boundaries use a
- * half-open `[A, B)` mask so the same t never gets counted twice.
+ * half-open `[A, B)` mask so the same T never gets counted twice.
  *
  * For props with NO keyframes the function returns the static
  * fallback as a literal so the caller can drop the result straight
  * into the filter without conditionals.
  *
- * `t` here matches the segment-local timeline because the encoder
- * runs each clip in its own ffmpeg call with `-ss` + `-t` cropping
- * the input to clip-local time. So a keyframe at clip-local 1000ms
- * compiles to `gte(t, 1.000000)` directly.
+ * `tVar` lets the caller substitute a CLIP-LOCAL expression when the
+ * filter sees global timeline `t` — e.g. when compositing multiple
+ * tracks in a single filter_complex pass, callers pass
+ * `tVar: "(t-${clip.start/1000})"` so keyframe times stay anchored
+ * to clip start.
  */
+export interface CompileOpts {
+  /** Expression that evaluates to clip-local seconds. Defaults to `"t"`. */
+  tVar?: string;
+}
+
 export function compileKeyframeExpression(
   keyframes: Keyframe[] | undefined,
   prop: KeyframeProp,
   fallback: number,
+  opts: CompileOpts = {},
 ): string {
+  const T = opts.tVar ?? "t";
   if (!keyframes || keyframes.length === 0) return formatNumber(fallback);
   const propKfs = keyframes
     .filter((k) => k.prop === prop)
@@ -42,7 +50,7 @@ export function compileKeyframeExpression(
   const last = propKfs[propKfs.length - 1]!;
 
   // Before first kf — held at first.value.
-  parts.push(`lt(t,${formatTime(first.time)})*${formatNumber(first.value)}`);
+  parts.push(`lt(${T},${formatTime(first.time)})*${formatNumber(first.value)}`);
 
   // Segments.
   for (let i = 0; i < propKfs.length - 1; i += 1) {
@@ -52,18 +60,18 @@ export function compileKeyframeExpression(
     const bSec = formatTime(b.time);
     const dur = (b.time - a.time) / 1000;
     if (dur <= 0) continue; // zero-length segment — skip to avoid div/0
-    const rawT = `(t-${aSec})/${formatNumber(dur)}`;
+    const rawT = `(${T}-${aSec})/${formatNumber(dur)}`;
     const easedT = easingExpression(rawT, a.easing ?? "linear");
     const delta = b.value - a.value;
     const lerpedExpr =
       delta === 0
         ? formatNumber(a.value) // value held — constant segment
         : `(${formatNumber(a.value)}+(${easedT})*(${formatNumber(delta)}))`;
-    parts.push(`gte(t,${aSec})*lt(t,${bSec})*${lerpedExpr}`);
+    parts.push(`gte(${T},${aSec})*lt(${T},${bSec})*${lerpedExpr}`);
   }
 
   // After last kf — held at last.value.
-  parts.push(`gte(t,${formatTime(last.time)})*${formatNumber(last.value)}`);
+  parts.push(`gte(${T},${formatTime(last.time)})*${formatNumber(last.value)}`);
 
   return parts.join("+");
 }

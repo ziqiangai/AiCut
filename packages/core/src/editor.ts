@@ -5,6 +5,7 @@ import {
   clipDuration,
   clipEnd,
   createEmptyProject,
+  defaultOutputForAspect,
   findClipContaining,
   findTrackOfClip,
   normalizeProject,
@@ -12,7 +13,12 @@ import {
   splitClipAt,
   trackEnd,
 } from "./model.js";
-import { setTimelineMetrics, wouldOverlap } from "./timeline/layout.js";
+import {
+  SCALE_MAX,
+  SCALE_MIN,
+  setTimelineMetrics,
+  wouldOverlap,
+} from "./timeline/layout.js";
 import {
   HtmlVideoEngine,
   type PlaybackEngine,
@@ -91,6 +97,14 @@ export interface EditorOptions {
    */
   timelineHeight?: number;
   /**
+   * Minimum pixel gap between ruler major ticks. The library picks the
+   * "nicest" interval (1s, 0.5s, 0.2s, …) that keeps majors at least
+   * this far apart for the current zoom. Default 80; lower (~50) packs
+   * labels denser, higher (~140) spaces them out. Reactive via
+   * `editor.setRulerMinTickPx(...)`.
+   */
+  rulerMinTickPx?: number;
+  /**
    * Per-clip keyframe animation (X / Y / Scale). Off by default; flip
    * `enabled: true` to surface keyframe markers on the timeline and
    * route the canvas / WebCodecs engines through `getEffectiveTransform`
@@ -137,7 +151,68 @@ export interface EditorOptions {
    * itself (different engines have different paint pipelines).
    */
   aspect?: { enabled?: boolean };
+  /**
+   * Multi-track picture-in-picture compositing in the preview. Off by
+   * default so today's single-clip behaviour is unchanged. When on,
+   * every video track's currently-active clip paints at the playhead
+   * with track `0` on top — matching the timeline's visual order.
+   *
+   * Audio policy: only the top track's clip stays unmuted; lower
+   * tracks mute to avoid stacking audio playback. Hosts wanting
+   * per-track audio control should disable PiP and roll their own
+   * mixer.
+   *
+   * Same-source caveat: a single `<video>` / decoder can only be at
+   * one `currentTime`, so a clip dropped on two tracks at different
+   * timeline positions visually appears in both, but plays from
+   * whichever position was activated last. The fix is to upload the
+   * source twice (separate `MediaSource.id`s).
+   *
+   * `HtmlVideoEngine`, `CanvasCompositorEngine` both implement PiP
+   * via `PlaybackEngine.setPictureInPictureEnabled`. Other engines
+   * fall back to single-clip.
+   *
+   * `toolbarAdd: true` surfaces a built-in "+ PiP overlay" icon
+   * button in the toolbar (next to the keyframe button). Clicking
+   * it emits the `requestPictureInPictureAdd` event — the LIBRARY
+   * doesn't run an upload itself. Hosts wire this to their existing
+   * file-picker / upload pipeline and then create the new clip
+   * wherever makes sense for their data model. Defaults to false
+   * so the chrome stays unchanged for hosts that roll their own UI.
+   *
+   * `enabled` controls whether multi-track composition actually
+   * happens. It's intentionally orthogonal to the toolbar button:
+   * the toolbar is "add a PiP", the enable flag is "show the
+   * compositor". Hosts typically wire a sidebar checkbox or
+   * settings menu to it.
+   */
+  pictureInPicture?: {
+    enabled?: boolean;
+    toolbarAdd?: boolean;
+  };
+  /**
+   * High-level editor layout.
+   *
+   * - `"centered"` (default): three-column grid — host content on
+   *   the left, preview locked to the centre 1/3, host content on
+   *   the right. CapCut-desktop convention.
+   * - `"fullWidth"`: preview spans the editor's full width with no
+   *   side columns — useful for embeds where the host doesn't want
+   *   to render any panels.
+   *   The preview's aspect frame sizes its height from that 1/3
+   *   width and the video letterboxes inside. Playback chrome
+   *   (time / play / duration / fullscreen) renders as an overlay
+   *   inside the preview, CapCut-desktop style, so the top toolbar
+   *   collapses to edit + viewport clusters only.
+   *
+   * Hosts wire `panelLeft` / `panelRight` slots via the React /
+   * Vue wrappers to fill the side columns. Reactive — flip via
+   * `editor.setPreviewLayout(...)`.
+   */
+  previewLayout?: PreviewLayout;
 }
+
+export type PreviewLayout = "fullWidth" | "centered";
 
 export interface EditorEventMap {
   /** Emitted whenever the project mutates. */
@@ -165,6 +240,19 @@ export interface EditorEventMap {
   clipEdgeNavEnabledChange: { enabled: boolean };
   /** Output-frame outline visibility flipped (Editor.setPreviewFrameEnabled). */
   previewFrameEnabledChange: { enabled: boolean };
+  /** Multi-track preview compositing toggle changed
+   *  (Editor.setPictureInPictureEnabled). */
+  pictureInPictureEnabledChange: { enabled: boolean };
+  /** Layout flipped between fullWidth and centered. */
+  previewLayoutChange: { layout: PreviewLayout };
+  /**
+   * User clicked the built-in "+ PiP overlay" toolbar button. Host
+   * is expected to surface its own file-picker / upload affordance
+   * and append the resulting clip somewhere appropriate (typically
+   * a new video track). The library doesn't ship an upload UI on
+   * purpose — different hosts have very different upload pipelines.
+   */
+  requestPictureInPictureAdd: void;
   /**
    * Aspect-ratio picker toggle changed (Editor.setAspectEnabled). Only
    * fires when the host-facing visibility flips — picking a new ratio
@@ -253,6 +341,11 @@ export interface EditorApi {
   getSnap(): boolean;
   setSnap(snap: boolean): void;
 
+  /** Read current ruler tick min-pixel-gap (see `rulerMinTickPx` option). */
+  getRulerMinTickPx(): number;
+  /** Update the ruler tick density at runtime. */
+  setRulerMinTickPx(px: number): void;
+
   // selection
   getSelection(): string | null;
   setSelection(clipId: string | null): void;
@@ -265,6 +358,13 @@ export interface EditorApi {
   /** Dashed output-frame outline visibility. Defaults to true. */
   isPreviewFrameEnabled(): boolean;
   setPreviewFrameEnabled(enabled: boolean): void;
+  /** Multi-track preview compositing (picture-in-picture). Defaults
+   *  to false. Flipping triggers an engine-side re-composite. */
+  isPictureInPictureEnabled(): boolean;
+  setPictureInPictureEnabled(enabled: boolean): void;
+  /** Current high-level editor layout. Defaults to "centered". */
+  getPreviewLayout(): PreviewLayout;
+  setPreviewLayout(layout: PreviewLayout): void;
   /** Built-in aspect picker visibility (CapCut-style 比例 dropdown). */
   isAspectEnabled(): boolean;
   setAspectEnabled(enabled: boolean): void;
@@ -272,16 +372,40 @@ export interface EditorApi {
   getAspect(): AspectRatio | null;
   /**
    * Set the output aspect ratio. Pass `null` to clear back to
-   * "Original". Persists on `Project.aspect`, emits `aspectChange`,
-   * and pushes a history entry so the change participates in undo.
-   * No-op when the value didn't change.
+   * "Original". Persists on `Project.aspect`, also writes the matching
+   * 1080p-tier dims into `Project.output`, emits `aspectChange`, and
+   * pushes a history entry so the change participates in undo. No-op
+   * when the value didn't change.
    */
   setAspect(aspect: AspectRatio | null): void;
+  /**
+   * Output canvas dims in pixels. THIS is the reference coordinate
+   * system every spatial value in the project lives in — keyframe
+   * panX/panY, the canvas guide rect, the export resolution. Falls
+   * back to `aspect`-derived dims, then to the first clip's intrinsic
+   * source size, when nothing's been set on the project explicitly.
+   */
+  getOutput(): { width: number; height: number; fps?: number };
+  /**
+   * Write output canvas dims into `Project.output`. Even-snaps both
+   * axes (H.264 requirement) and pushes history. Pan / scale already
+   * stored against the previous canvas are NOT rescaled — same as
+   * how Premiere handles a sequence-settings change. Hosts who want
+   * value preservation should normalize keyframes themselves.
+   */
+  setOutput(output: { width: number; height: number; fps?: number }): void;
   /** Screen-space CSS-pixel rect of the active rendered frame, post
    *  transform, relative to the editor preview. Null when none. */
   getActiveFrameRect():
     | { x: number; y: number; w: number; h: number }
     | null;
+  /** Same as `getActiveFrameRect` but for an arbitrary clipId. Used
+   *  by the overlay's hit-testing to figure out which PiP clip a
+   *  click in the preview lands on. Null when the clip isn't
+   *  currently being painted. */
+  getClipFrameRect(
+    clipId: string,
+  ): { x: number; y: number; w: number; h: number } | null;
   /** Output frame rect (fixed bounds, no transform). The overlay
    *  draws the dashed border here. */
   getActiveOutputFrameRect():
@@ -425,6 +549,17 @@ export interface EditorApi {
   readonly headerLeft: HTMLElement;
   /** Right-side header slot — conventionally Share / Export / etc. */
   readonly headerRight: HTMLElement;
+  /**
+   * Side panel slot, rendered only when `previewLayout === "centered"`.
+   * Sits to the LEFT of the preview at 1/3 of the editor's width.
+   * Conventionally a media library / asset browser. Empty when the
+   * layout is `"fullWidth"` — the editor's overall grid still
+   * reserves the slot but CSS collapses it.
+   */
+  readonly panelLeft: HTMLElement;
+  /** Right side panel slot — conventionally an inspector / clip
+   *  properties panel. See `panelLeft`. */
+  readonly panelRight: HTMLElement;
 
   // events
   on<K extends EditorEventName>(
@@ -439,8 +574,8 @@ export interface EditorApi {
 }
 
 const DEFAULT_PX_PER_SEC = 80;
-const MIN_PX_PER_SEC = 10;
-const MAX_PX_PER_SEC = 400;
+const MIN_PX_PER_SEC = SCALE_MIN;
+const MAX_PX_PER_SEC = SCALE_MAX;
 /** Snap distance in pixels at the current zoom. Converted to ms per call. */
 const SNAP_PX = 8;
 
@@ -468,6 +603,9 @@ export class Editor implements EditorApi {
   private clipEdgeNavEnabled: boolean;
   private aspectEnabled: boolean;
   private previewFrameEnabled: boolean;
+  private pictureInPictureEnabled: boolean;
+  private previewLayout: PreviewLayout;
+  private pictureInPictureToolbarAddEnabled: boolean;
   /** Drag-session bookkeeping for ripple-merge undo. See
    *  beginInteraction / endInteraction docs on EditorApi. */
   private interactionDepth = 0;
@@ -475,6 +613,7 @@ export class Editor implements EditorApi {
   private pxPerSec: number;
   private snap: boolean;
   private locale: Locale;
+  private rulerMinTickPx: number;
   private destroyed = false;
 
   constructor(opts: EditorOptions) {
@@ -483,6 +622,7 @@ export class Editor implements EditorApi {
     this.pxPerSec = clampScale(opts.initialScale ?? DEFAULT_PX_PER_SEC);
     this.snap = opts.initialSnap !== false;
     this.locale = mergeLocale(opts.locale);
+    this.rulerMinTickPx = Math.max(20, Math.round(opts.rulerMinTickPx ?? 80));
     this.keyframesEnabled = opts.keyframes?.enabled === true;
     this.clipEdgeNavEnabled = opts.clipEdgeNav?.enabled === true;
     this.aspectEnabled = opts.aspect?.enabled === true;
@@ -490,6 +630,10 @@ export class Editor implements EditorApi {
     // even when keyframe editing is off; hosts who want a clean
     // preview pass `previewFrame: { enabled: false }` to opt out.
     this.previewFrameEnabled = opts.previewFrame?.enabled !== false;
+    this.pictureInPictureEnabled = opts.pictureInPicture?.enabled === true;
+    this.previewLayout = opts.previewLayout ?? "centered";
+    this.pictureInPictureToolbarAddEnabled =
+      opts.pictureInPicture?.toolbarAdd === true;
 
     // Must run before EditorUI builds the Timeline — those layout
     // values are read at canvas init time.
@@ -534,6 +678,8 @@ export class Editor implements EditorApi {
       onSeekClipStart: () => this.seekToSelectedClipEdge("start"),
       onSeekClipEnd: () => this.seekToSelectedClipEdge("end"),
       onAspectChange: (a) => this.setAspect(a),
+      onPictureInPictureAdd: () =>
+        this.bus.emit("requestPictureInPictureAdd", undefined),
     });
 
     const engineFactory: PlaybackEngineFactory =
@@ -542,6 +688,9 @@ export class Editor implements EditorApi {
       host: this.ui.previewHost,
       project: this.project,
     });
+    // Push initial PiP state to the engine. Engines that don't
+    // implement the flag just ignore it.
+    this.engine.setPictureInPictureEnabled?.(this.pictureInPictureEnabled);
     this.engine.onTimeUpdate = (ms) => {
       this.bus.emit("time", { timeMs: ms });
       this.ui.onTimeTick(ms);
@@ -574,6 +723,14 @@ export class Editor implements EditorApi {
 
   get headerRight(): HTMLElement {
     return this.ui.headerRight;
+  }
+
+  get panelLeft(): HTMLElement {
+    return this.ui.panelLeft;
+  }
+
+  get panelRight(): HTMLElement {
+    return this.ui.panelRight;
   }
 
   // ---- playback -------------------------------------------------------
@@ -980,6 +1137,7 @@ export class Editor implements EditorApi {
     // Re-fit on project swap — the new project's duration is likely
     // different so the previous scale is meaningless.
     this.ui.resetAutoFit();
+    this.ui.setAspect(this.getAspect());
     this.ui.render();
   }
 
@@ -1072,6 +1230,17 @@ export class Editor implements EditorApi {
     this.ui.render();
   }
 
+  getRulerMinTickPx(): number {
+    return this.rulerMinTickPx;
+  }
+
+  setRulerMinTickPx(px: number): void {
+    const next = Math.max(20, Math.round(px));
+    if (next === this.rulerMinTickPx) return;
+    this.rulerMinTickPx = next;
+    this.ui.setRulerMinTickPx(next);
+  }
+
   /** Snap a candidate ms to the nearest snappable surface within SNAP_PX. */
   snapMs(timeMs: Ms, ignoreClipId?: string | null): Ms {
     if (!this.snap) return timeMs;
@@ -1133,11 +1302,25 @@ export class Editor implements EditorApi {
    * Null when no clip is active, the engine doesn't expose
    * `getFrameRect`, or the rect isn't computed yet. Used by the
    * library's keyframe-editing overlay.
+   *
+   * When PiP is on and a non-primary clip is selected, returns
+   * THAT clip's rect — that's how the overlay's dashed border +
+   * corner handles latch onto a picture-in-picture overlay. With
+   * PiP off (or nothing selected) falls back to the primary clip.
    */
   getActiveFrameRect():
     | { x: number; y: number; w: number; h: number }
     | null {
-    return this.engine.getFrameRect?.() ?? null;
+    const selected = this.pictureInPictureEnabled
+      ? (this.selectedClipId ?? undefined)
+      : undefined;
+    return this.engine.getFrameRect?.(selected) ?? null;
+  }
+
+  getClipFrameRect(
+    clipId: string,
+  ): { x: number; y: number; w: number; h: number } | null {
+    return this.engine.getFrameRect?.(clipId) ?? null;
   }
 
   /**
@@ -1150,7 +1333,10 @@ export class Editor implements EditorApi {
   getActiveOutputFrameRect():
     | { x: number; y: number; w: number; h: number }
     | null {
-    return this.engine.getOutputFrameRect?.() ?? null;
+    const selected = this.pictureInPictureEnabled
+      ? (this.selectedClipId ?? undefined)
+      : undefined;
+    return this.engine.getOutputFrameRect?.(selected) ?? null;
   }
 
   setKeyframesEnabled(enabled: boolean): void {
@@ -1188,6 +1374,37 @@ export class Editor implements EditorApi {
     this.ui.render();
   }
 
+  isPictureInPictureEnabled(): boolean {
+    return this.pictureInPictureEnabled;
+  }
+
+  /** Whether the built-in "+ PiP overlay" toolbar button is rendered. */
+  isPictureInPictureToolbarAddEnabled(): boolean {
+    return this.pictureInPictureToolbarAddEnabled;
+  }
+
+  setPictureInPictureEnabled(enabled: boolean): void {
+    if (enabled === this.pictureInPictureEnabled) return;
+    this.pictureInPictureEnabled = enabled;
+    // Push to the engine — engines that implement it re-composite on
+    // the next paint tick. Engines that don't ignore the call.
+    this.engine.setPictureInPictureEnabled?.(enabled);
+    this.bus.emit("pictureInPictureEnabledChange", { enabled });
+    this.ui.render();
+  }
+
+  getPreviewLayout(): PreviewLayout {
+    return this.previewLayout;
+  }
+
+  setPreviewLayout(layout: PreviewLayout): void {
+    if (layout === this.previewLayout) return;
+    this.previewLayout = layout;
+    this.ui.setPreviewLayout(layout);
+    this.bus.emit("previewLayoutChange", { layout });
+    this.ui.render();
+  }
+
   isAspectEnabled(): boolean {
     return this.aspectEnabled;
   }
@@ -1211,9 +1428,65 @@ export class Editor implements EditorApi {
       delete this.project.aspect;
     } else {
       this.project.aspect = aspect;
+      // Mirror the chosen aspect into the authoritative `output`
+      // dims — picking 9:16 should immediately give the canvas a
+      // 9:16 reference frame in EVERY consumer (preview, overlay,
+      // backend export), without each having to derive the size
+      // from the aspect string separately.
+      const dims = defaultOutputForAspect(aspect);
+      const prevFps = this.project.output?.fps;
+      this.project.output = {
+        width: dims.width,
+        height: dims.height,
+        ...(prevFps != null ? { fps: prevFps } : {}),
+      };
     }
     this.afterMutation();
+    this.ui.setAspect(aspect);
     this.bus.emit("aspectChange", { aspect });
+  }
+
+  getOutput(): { width: number; height: number; fps?: number } {
+    const out = this.project.output;
+    if (out) {
+      return out.fps != null
+        ? { width: out.width, height: out.height, fps: out.fps }
+        : { width: out.width, height: out.height };
+    }
+    // No `output` field yet — derive a reasonable canvas size for
+    // hosts that need to query before the user picks anything. Order
+    // mirrors normalizeProject: aspect → first-clip source dims →
+    // 1080p fallback.
+    if (this.project.aspect) {
+      const dims = defaultOutputForAspect(this.project.aspect);
+      return { width: dims.width, height: dims.height };
+    }
+    const ref = this.engine.getCanvasReferenceDims?.();
+    if (ref) return { width: ref[0], height: ref[1] };
+    return { width: 1920, height: 1080 };
+  }
+
+  setOutput(output: { width: number; height: number; fps?: number }): void {
+    const w = evenPx(output.width);
+    const h = evenPx(output.height);
+    if (w <= 0 || h <= 0) return;
+    const current = this.project.output;
+    if (
+      current &&
+      current.width === w &&
+      current.height === h &&
+      (current.fps ?? null) === (output.fps ?? null)
+    ) {
+      return;
+    }
+    this.pushHistory();
+    this.project.output = {
+      width: w,
+      height: h,
+      ...(output.fps != null && output.fps > 0 ? { fps: output.fps } : {}),
+    };
+    this.afterMutation();
+    this.ui.render();
   }
 
   addKeyframe(
@@ -1273,19 +1546,34 @@ export class Editor implements EditorApi {
     if (!trk || !cl || !kf || !cl.keyframes) return false;
     const duration = clipDuration(cl);
     const clamped = Math.max(0, Math.min(duration, Math.round(timeMs)));
-    if (clamped === kf.time) return false;
-    // Reject moves that would collide with another keyframe on the
-    // SAME prop at the exact same time — different props can coexist.
-    if (
-      cl.keyframes.some(
+    // Identify every kf in the same "moment" as the grabbed one (same
+    // clip-local time, within the 16 ms tolerance the timeline uses for
+    // visual grouping). When the user pins via the toolbar "+ kf"
+    // button all three props (panX / panY / scale) land at the same
+    // time; dragging one without the others would visually fracture
+    // the moment so move them all as a unit.
+    const MOMENT_TOL = 16;
+    const groupOriginalTime = kf.time;
+    const group = cl.keyframes.filter(
+      (k) => Math.abs(k.time - groupOriginalTime) <= MOMENT_TOL,
+    );
+    const groupIds = new Set(group.map((k) => k.id));
+    const delta = clamped - groupOriginalTime;
+    if (delta === 0) return false;
+    // Reject collisions: any kf that's NOT part of the moving group
+    // at the same prop+time would land on top.
+    for (const g of group) {
+      const newTime = g.time + delta;
+      const collision = cl.keyframes.some(
         (k) =>
-          k.id !== keyframeId && k.prop === kf.prop && k.time === clamped,
-      )
-    ) {
-      return false;
+          !groupIds.has(k.id) &&
+          k.prop === g.prop &&
+          Math.abs(k.time - newTime) < 1,
+      );
+      if (collision) return false;
     }
     this.pushHistory();
-    kf.time = clamped;
+    for (const g of group) g.time += delta;
     cl.keyframes.sort((a, b) => {
       if (a.prop !== b.prop) return a.prop.localeCompare(b.prop);
       return a.time - b.time;
@@ -1730,4 +2018,12 @@ export class Editor implements EditorApi {
 
 function clampScale(s: number): number {
   return Math.max(MIN_PX_PER_SEC, Math.min(MAX_PX_PER_SEC, s));
+}
+
+/** H.264 requires even output dims — snap to the nearest even pixel,
+ *  trimming rather than expanding so the canvas never exceeds the
+ *  requested size. */
+function evenPx(n: number): number {
+  const r = Math.max(2, Math.round(n));
+  return r % 2 === 0 ? r : r - 1;
 }

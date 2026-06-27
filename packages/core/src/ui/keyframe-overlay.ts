@@ -3,6 +3,16 @@ import { getEffectiveTransform } from "../keyframes/index.js";
 import type { Clip } from "../types.js";
 
 /**
+ * Eight resize handles: 4 corners (tl/tr/bl/br) + 4 edge midpoints
+ * (t/r/b/l). Corners resize both dimensions; edges resize only the
+ * perpendicular dimension. Aspect is locked either way (single
+ * `scale` value on the clip), so a horizontal edge drag still
+ * changes the clip's height proportionally — same posture as
+ * shift-resize in any graphics editor.
+ */
+type HandleKind = "tl" | "tr" | "bl" | "br" | "t" | "r" | "b" | "l";
+
+/**
  * Direct-manipulation overlay on top of the preview area. When
  * keyframes mode is on AND the active engine exposes a frame rect,
  * paints a 1px dashed border around the OUTPUT frame (fixed) + four
@@ -25,8 +35,19 @@ export class KeyframeOverlay {
   private editor: Editor;
   private host: HTMLElement;
   readonly root: HTMLDivElement;
+  /**
+   * Static canvas-extent guide pinned to the OUTPUT rect. Shows the
+   * editable area regardless of selection — same affordance the
+   * dashed border had before PiP. Visibility gated on
+   * `previewFrame.enabled`. Always purely visual: pointer-events
+   * pass through so clicks land on whatever lives below.
+   */
+  private canvasGuide: HTMLDivElement;
+  /** Selection-following frame pinned to the SELECTED clip's content
+   *  rect. Doubles as the drag-to-pan hit target when keyframes mode
+   *  is on; corner handles attach to its bounds. */
   private frameBody: HTMLDivElement;
-  private handles: Record<"tl" | "tr" | "bl" | "br", HTMLDivElement>;
+  private handles: Record<HandleKind, HTMLDivElement>;
   private rafHandle: number | null = null;
   private destroyed = false;
   private drag:
@@ -41,10 +62,33 @@ export class KeyframeOverlay {
     | {
         kind: "scale";
         clipId: string;
-        centerX: number;
-        centerY: number;
-        startDistance: number;
-        startScale: number;
+        /** Viewport coords of the anchored point — stays fixed. For
+         *  corner drags this is the opposite corner; for edge drags
+         *  it's the opposite edge's midpoint. */
+        anchorX: number;
+        anchorY: number;
+        /** Direction from anchor to dragged corner / edge. ±1 per axis. */
+        dirX: 1 | -1;
+        dirY: 1 | -1;
+        /** Per-axis projection mask: corners use both (1, 1); edge
+         *  handles only consume the perpendicular axis so a top-edge
+         *  drag ignores horizontal cursor motion. */
+        axisX: 0 | 1;
+        axisY: 0 | 1;
+        /** Content dims when scale = 1, in viewport CSS px. */
+        baseW: number;
+        baseH: number;
+        /** Output canvas center in viewport coords — to convert
+         *  newCenter into pan offsets. */
+        canvasCenterX: number;
+        canvasCenterY: number;
+        /** Offset between the pointerdown position and the
+         *  handle's LOGICAL anchor point (corner / edge midpoint).
+         *  Subtracted from every subsequent cursor read so the clip
+         *  doesn't jump at the start of a drag when the user clicks
+         *  off-center inside the 18×6 / 6×18 handle hit zone. */
+        grabOffsetX: number;
+        grabOffsetY: number;
       }
     | null = null;
   private capturedPointerId: number | null = null;
@@ -61,6 +105,11 @@ export class KeyframeOverlay {
     this.root.className = "aicut-keyframe-overlay";
     this.root.setAttribute("data-testid", "aicut-keyframe-overlay");
     this.root.style.display = "none";
+
+    this.canvasGuide = document.createElement("div");
+    this.canvasGuide.className = "aicut-keyframe-overlay__canvas-guide";
+    this.canvasGuide.setAttribute("data-testid", "aicut-keyframe-canvas-guide");
+    this.root.appendChild(this.canvasGuide);
 
     this.frameBody = document.createElement("div");
     this.frameBody.className = "aicut-keyframe-overlay__frame";
@@ -81,14 +130,84 @@ export class KeyframeOverlay {
       tr: this.makeHandle("tr"),
       bl: this.makeHandle("bl"),
       br: this.makeHandle("br"),
+      t: this.makeHandle("t"),
+      r: this.makeHandle("r"),
+      b: this.makeHandle("b"),
+      l: this.makeHandle("l"),
     };
 
     host.appendChild(this.root);
+    // Click-to-select on the preview host — capture phase so it
+    // runs BEFORE the overlay's own frame body / handles fire their
+    // pointerdown. Without that, selecting the main clip would
+    // stretch the frame body across the whole canvas and every
+    // subsequent click would start a translate drag of the main
+    // clip instead of selecting the PiP underneath the cursor.
+    this.host.addEventListener("pointerdown", this.onHostPointerDown, true);
     this.startTick();
   }
 
+  private onHostPointerDown = (e: PointerEvent): void => {
+    if (e.button !== 0) return;
+    if (!this.editor.isKeyframesEnabled()) return;
+    // Always ignore clicks on the resize handles — they have their
+    // own scale-drag handler.
+    const target = e.target as HTMLElement | null;
+    if (
+      target &&
+      target.classList.contains("aicut-keyframe-overlay__handle")
+    ) {
+      return;
+    }
+    const project = this.editor.getProject();
+    const timeMs = this.editor.getTime();
+    const hostRect = this.host.getBoundingClientRect();
+    const cx = e.clientX - hostRect.left;
+    const cy = e.clientY - hostRect.top;
+    const currentSelection = this.editor.getSelection();
+    // Walk tracks top-down (highest index = topmost z) so PiP
+    // overlays win the hit-test over the main background.
+    for (let i = project.tracks.length - 1; i >= 0; i--) {
+      const track = project.tracks[i]!;
+      if (track.kind !== "video") continue;
+      const clip = track.clips.find(
+        (c) =>
+          timeMs >= c.start && timeMs < c.start + (c.out - c.in),
+      );
+      if (!clip) continue;
+      const rect = this.editor.getClipFrameRect(clip.id);
+      if (!rect) continue;
+      if (
+        cx < rect.x ||
+        cx > rect.x + rect.w ||
+        cy < rect.y ||
+        cy > rect.y + rect.h
+      ) {
+        continue;
+      }
+      if (clip.id === currentSelection) {
+        // Click landed on the already-selected clip — let the
+        // frame body's pointerdown fire and start a translate
+        // drag like before.
+        return;
+      }
+      // Re-route the click to a selection change and prevent the
+      // frame body from interpreting it as a drag of the previously
+      // selected clip.
+      this.editor.setSelection(clip.id);
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+  };
+
   destroy(): void {
     this.destroyed = true;
+    this.host.removeEventListener(
+      "pointerdown",
+      this.onHostPointerDown,
+      true,
+    );
     if (this.rafHandle != null) cancelAnimationFrame(this.rafHandle);
     if (this.wheelInteractionTimer != null) {
       clearTimeout(this.wheelInteractionTimer);
@@ -165,30 +284,106 @@ export class KeyframeOverlay {
 
   // ---- corner-handle drag (scale) --------------------------------------
 
-  private onScaleStart(corner: "tl" | "tr" | "bl" | "br", e: PointerEvent): void {
+  private onScaleStart(handle: HandleKind, e: PointerEvent): void {
     if (e.button !== 0) return;
     const ctx = this.ensureSelectedClip();
     if (!ctx) return;
     e.preventDefault();
     e.stopPropagation();
-    const rect = this.editor.getActiveOutputFrameRect()
-      ?? this.editor.getActiveFrameRect();
-    if (!rect) return;
+    // CapCut-style anchored resize: the OPPOSITE corner / edge stays
+    // pinned. For edge handles the anchor is the parallel edge — the
+    // dragged edge moves only along its perpendicular axis but the
+    // perpendicular axis still drives a uniform scale, so the
+    // dragged edge follows the cursor along its drag axis and the
+    // perpendicular axis grows / shrinks in tandem.
+    const clipRect = this.editor.getActiveFrameRect();
+    const outRect = this.editor.getActiveOutputFrameRect();
+    if (!clipRect || !outRect) return;
     const hostRect = this.host.getBoundingClientRect();
-    const cx = hostRect.left + rect.x + rect.w / 2;
-    const cy = hostRect.top + rect.y + rect.h / 2;
-    const startDist = Math.hypot(e.clientX - cx, e.clientY - cy);
-    if (startDist < 1) return;
-    const target = this.handles[corner];
+
+    // Edge handles ignore one axis entirely. For top edge, anchor =
+    // bottom edge midpoint; for left edge, anchor = right edge
+    // midpoint; etc. Corner handles anchor the opposite corner.
+    const touchesTop = handle === "tl" || handle === "tr" || handle === "t";
+    const touchesBottom = handle === "bl" || handle === "br" || handle === "b";
+    const touchesLeft = handle === "tl" || handle === "bl" || handle === "l";
+    const touchesRight = handle === "tr" || handle === "br" || handle === "r";
+    // Anchor goes to the OPPOSITE side of whatever the handle
+    // touches. When the handle doesn't touch a given side (e.g. the
+    // "t" edge handle is on top but doesn't touch left/right), the
+    // anchor along that axis sits at the clip CENTER — i.e. that
+    // axis is shared 50/50 across the resize, mirroring the edge
+    // expansion symmetrically.
+    let anchorOffsetX: number;
+    let dirX: 1 | -1;
+    if (touchesLeft) {
+      anchorOffsetX = clipRect.w; // anchor at right edge
+      dirX = -1;
+    } else if (touchesRight) {
+      anchorOffsetX = 0; // anchor at left edge
+      dirX = 1;
+    } else {
+      anchorOffsetX = clipRect.w / 2; // anchor at horizontal center
+      dirX = 1; // unused for edge handles' projection
+    }
+    let anchorOffsetY: number;
+    let dirY: 1 | -1;
+    if (touchesTop) {
+      anchorOffsetY = clipRect.h;
+      dirY = -1;
+    } else if (touchesBottom) {
+      anchorOffsetY = 0;
+      dirY = 1;
+    } else {
+      anchorOffsetY = clipRect.h / 2;
+      dirY = 1;
+    }
+    const anchorX = hostRect.left + clipRect.x + anchorOffsetX;
+    const anchorY = hostRect.top + clipRect.y + anchorOffsetY;
+
+    // Base content size at scale = 1.
+    const baseW = clipRect.w / ctx.transform.scale;
+    const baseH = clipRect.h / ctx.transform.scale;
+    if (baseW < 1 || baseH < 1) return;
+
+    const canvasCenterX = hostRect.left + outRect.x + outRect.w / 2;
+    const canvasCenterY = hostRect.top + outRect.y + outRect.h / 2;
+
+    const target = this.handles[handle];
     target.setPointerCapture(e.pointerId);
     this.capturedPointerId = e.pointerId;
+    const axisX: 0 | 1 = touchesLeft || touchesRight ? 1 : 0;
+    const axisY: 0 | 1 = touchesTop || touchesBottom ? 1 : 0;
+    // Where the handle's LOGICAL anchor point sits in viewport
+    // coords — the actual edge / corner position, not the click
+    // location. Used to compute the grab offset below.
+    const handleLogicalX = touchesLeft
+      ? hostRect.left + clipRect.x
+      : touchesRight
+        ? hostRect.left + clipRect.x + clipRect.w
+        : hostRect.left + clipRect.x + clipRect.w / 2;
+    const handleLogicalY = touchesTop
+      ? hostRect.top + clipRect.y
+      : touchesBottom
+        ? hostRect.top + clipRect.y + clipRect.h
+        : hostRect.top + clipRect.y + clipRect.h / 2;
+    const grabOffsetX = e.clientX - handleLogicalX;
+    const grabOffsetY = e.clientY - handleLogicalY;
     this.drag = {
       kind: "scale",
       clipId: ctx.clip.id,
-      centerX: cx,
-      centerY: cy,
-      startDistance: startDist,
-      startScale: ctx.transform.scale,
+      anchorX,
+      anchorY,
+      dirX,
+      dirY,
+      axisX,
+      axisY,
+      baseW,
+      baseH,
+      canvasCenterX,
+      canvasCenterY,
+      grabOffsetX,
+      grabOffsetY,
     };
     this.editor.beginInteraction();
     target.addEventListener("pointermove", this.onPointerMove);
@@ -199,10 +394,18 @@ export class KeyframeOverlay {
   private onPointerMove = (e: PointerEvent): void => {
     if (!this.drag) return;
     if (this.drag.kind === "translate") {
-      const dx = e.clientX - this.drag.pointerStartX;
-      const dy = e.clientY - this.drag.pointerStartY;
-      const rawPanX = this.drag.startPanX + dx;
-      const rawPanY = this.drag.startPanY + dy;
+      const dxCss = e.clientX - this.drag.pointerStartX;
+      const dyCss = e.clientY - this.drag.pointerStartY;
+      // Convert the CSS-pixel cursor delta into CANVAS pixels — the
+      // unit pan values are stored in. `getActiveOutputFrameRect`
+      // returns the canvas guide's CSS-px bounds; the editor knows
+      // the canvas dims. Ratio = canvasPx / cssPx.
+      const out = this.editor.getActiveOutputFrameRect();
+      const canvas = this.editor.getOutput();
+      const cssToCanvasX = out && out.w > 0 ? canvas.width / out.w : 1;
+      const cssToCanvasY = out && out.h > 0 ? canvas.height / out.h : 1;
+      const rawPanX = this.drag.startPanX + dxCss * cssToCanvasX;
+      const rawPanY = this.drag.startPanY + dyCss * cssToCanvasY;
       // Snap to: centered (0), and (when content > output) left/right
       // / top/bottom edge alignment between content and output.
       const snapped = this.applySnap(this.drag.clipId, rawPanX, rawPanY);
@@ -217,28 +420,95 @@ export class KeyframeOverlay {
         Math.round(snapped.panY),
       );
     } else {
-      const dist = Math.hypot(
-        e.clientX - this.drag.centerX,
-        e.clientY - this.drag.centerY,
-      );
-      const ratio = dist / this.drag.startDistance;
-      const next = Math.max(
-        0.05,
-        Math.min(16, this.drag.startScale * ratio),
-      );
-      this.editor.setValueAtPlayhead(
-        this.drag.clipId,
-        "scale",
-        Math.round(next * 100) / 100,
-      );
+      // Corner resize with the OPPOSITE corner anchored. Aspect is
+      // locked (single `scale` value); we project the cursor's
+      // displacement from the anchor onto the natural diagonal
+      // direction (baseW, baseH). This gives a smooth, jitter-free
+      // scale that doesn't flicker between axes the way max(sx, sy)
+      // does when the cursor wanders slightly off-diagonal — the
+      // opposite corner stays pinned to within float-rounding noise
+      // instead of bouncing by a pixel each frame.
+      // Subtract the grab-offset so the math always treats the
+      // cursor as if it had clicked exactly on the handle's logical
+      // anchor point. Eliminates the 1-2px "jump" the user sees the
+      // moment they press on a wide edge handle slightly off-center.
+      const cursorX = e.clientX - this.drag.grabOffsetX;
+      const cursorY = e.clientY - this.drag.grabOffsetY;
+      const offsetX = (cursorX - this.drag.anchorX) * this.drag.dirX;
+      const offsetY = (cursorY - this.drag.anchorY) * this.drag.dirY;
+      // Mask out axes the handle isn't supposed to consume (edge
+      // handles only listen to the perpendicular axis). For corners
+      // axisX = axisY = 1, so this is a no-op.
+      const projX = offsetX * this.drag.axisX;
+      const projY = offsetY * this.drag.axisY;
+      // Effective base length along the active axes. For an edge
+      // handle this collapses to a single axis; for a corner it's
+      // the natural diagonal. Either way the scale comes out as the
+      // ratio along that axis, which is exactly the
+      // opposite-anchor-stays-pinned semantics.
+      const activeBaseW = this.drag.baseW * this.drag.axisX;
+      const activeBaseH = this.drag.baseH * this.drag.axisY;
+      const L = Math.hypot(activeBaseW, activeBaseH) || 1;
+      const proj = (projX * activeBaseW + projY * activeBaseH) / L;
+      let next = Math.max(0.05, Math.min(16, proj / L));
+      // Snap the scale to common stops (full canvas, half, quarter,
+      // double) when the snap toggle is on AND the user gets close
+      // enough. Distance threshold is in CSS px on the active axis,
+      // converted from the SNAP_PX timeline threshold so the feel
+      // matches: edges that look "near full canvas" lock in.
+      if (this.editor.getSnap()) {
+        const snapTargets = [1, 0.5, 0.25, 2];
+        for (const target of snapTargets) {
+          const targetProj = target * L;
+          if (Math.abs(proj - targetProj) <= KeyframeOverlay.SNAP_PX) {
+            next = target;
+            break;
+          }
+        }
+      }
+      const newW = this.drag.baseW * next;
+      const newH = this.drag.baseH * next;
+      // For edge handles the perpendicular axis is the anchor's own
+      // axis (axisX = 0 means anchor sits at the clip's horizontal
+      // center; axisY = 0 means it sits at the vertical center).
+      // Multiplying by axisX/axisY gates the half-dimension offset
+      // so an edge drag doesn't shove the clip sideways by half its
+      // width — `anchorX + dirX * (newW/2)` would push horizontally
+      // for a top-edge drag, which is exactly the "jumps right by
+      // the full width" symptom we were seeing.
+      const newCenterX =
+        this.drag.anchorX + this.drag.axisX * this.drag.dirX * (newW / 2);
+      const newCenterY =
+        this.drag.anchorY + this.drag.axisY * this.drag.dirY * (newH / 2);
+      // `newCenter - canvasCenter` is in CSS px (both are viewport
+      // coords). panX/panY now live in CANVAS pixels, so convert via
+      // the same ratio the translate-drag uses — without this the
+      // anchored corner appears to "jump" the moment the user starts
+      // dragging because the stored value reads back through paint()
+      // at the wrong scale.
+      const outRect = this.editor.getActiveOutputFrameRect();
+      const canvas = this.editor.getOutput();
+      const cssToCanvasX = outRect && outRect.w > 0 ? canvas.width / outRect.w : 1;
+      const cssToCanvasY = outRect && outRect.h > 0 ? canvas.height / outRect.h : 1;
+      // Don't round pan offsets here — quantising them to integers
+      // would let the anchored corner jitter as scale grows
+      // continuously. Storage precision is fine for floats and the
+      // editor commits one history entry per drag anyway.
+      const newPanX = (newCenterX - this.drag.canvasCenterX) * cssToCanvasX;
+      const newPanY = (newCenterY - this.drag.canvasCenterY) * cssToCanvasY;
+      this.editor.setValueAtPlayhead(this.drag.clipId, "scale", next);
+      this.editor.setValueAtPlayhead(this.drag.clipId, "panX", newPanX);
+      this.editor.setValueAtPlayhead(this.drag.clipId, "panY", newPanY);
     }
   };
 
   /**
    * Snap raw pan to: centered (panX/Y = 0) and the four edge-alignment
    * stops (content's L/R/T/B edge flush with the output's matching
-   * edge). When content is smaller than output, the edge stops collapse
-   * to the same point as 0 — harmless dup. Threshold = 8 CSS px.
+   * edge). All math here is in CANVAS pixels — the unit pan values
+   * are stored in. CSS-px frame rects from the engine get converted
+   * up via the canvas/CSS ratio so snap thresholds stay visually 8 px
+   * on screen regardless of preview size.
    */
   private applySnap(
     clipId: string,
@@ -249,6 +519,9 @@ export class KeyframeOverlay {
     if (!out) return { panX: rawPanX, panY: rawPanY };
     const clip = this.findClip(clipId);
     if (!clip) return { panX: rawPanX, panY: rawPanY };
+    const canvas = this.editor.getOutput();
+    const cssToCanvasX = out.w > 0 ? canvas.width / out.w : 1;
+    const cssToCanvasY = out.h > 0 ? canvas.height / out.h : 1;
     // Content size at current scale (which may differ from base — the
     // user can be mid-scaling alongside the drag conceptually).
     const t = (() => {
@@ -260,18 +533,17 @@ export class KeyframeOverlay {
         return null;
       }
     })();
-    const contentW = t?.w ?? out.w;
-    const contentH = t?.h ?? out.h;
-    // Edge stops: content edge aligned with output edge.
-    //   contentRight = panX + contentW/2 + outCenter.x — but here we
-    //   work in "panX from centered=0", so the edge-alignment panX is
-    //   ±(contentW - outW)/2 (same for Y).
-    const edgeX = (contentW - out.w) / 2;
-    const edgeY = (contentH - out.h) / 2;
+    const contentWCss = t?.w ?? out.w;
+    const contentHCss = t?.h ?? out.h;
+    // Edge stops in canvas pixels.
+    const edgeX = ((contentWCss - out.w) / 2) * cssToCanvasX;
+    const edgeY = ((contentHCss - out.h) / 2) * cssToCanvasY;
     const xTargets = [0, edgeX, -edgeX];
     const yTargets = [0, edgeY, -edgeY];
-    const px = nearestSnap(rawPanX, xTargets, KeyframeOverlay.SNAP_PX);
-    const py = nearestSnap(rawPanY, yTargets, KeyframeOverlay.SNAP_PX);
+    const thresholdX = KeyframeOverlay.SNAP_PX * cssToCanvasX;
+    const thresholdY = KeyframeOverlay.SNAP_PX * cssToCanvasY;
+    const px = nearestSnap(rawPanX, xTargets, thresholdX);
+    const py = nearestSnap(rawPanY, yTargets, thresholdY);
     return { panX: px, panY: py };
   }
 
@@ -349,48 +621,83 @@ export class KeyframeOverlay {
       "aicut-keyframe-overlay--interactive",
       interactive,
     );
-    this.frameBody.style.display = frameVisible ? "block" : "none";
-    Object.assign(this.frameBody.style, {
+    // Canvas guide — dashed outline of the output canvas. Same
+    // affordance the dashed border had before PiP existed. Gated on
+    // `previewFrame.enabled` regardless of selection.
+    this.canvasGuide.style.display = frameVisible ? "block" : "none";
+    Object.assign(this.canvasGuide.style, {
       left: `${outRect.x}px`,
       top: `${outRect.y}px`,
       width: `${outRect.w}px`,
       height: `${outRect.h}px`,
     });
-    // Border state: brand color when the content fully covers the
-    // output (normal pan / zoom). Solid red when ANY part of the
-    // output frame isn't covered by content (i.e. the user has
-    // panned far enough to expose letterbox / would lose coverage).
-    // Persistent rather than drag-only — so a user who navigates back
-    // to a bad keyframe still sees the warning without having to
-    // touch the overlay.
-    const fullyCovered = contentRect
-      ? contentRect.x <= outRect.x + 0.5 &&
-        contentRect.x + contentRect.w >= outRect.x + outRect.w - 0.5 &&
-        contentRect.y <= outRect.y + 0.5 &&
-        contentRect.y + contentRect.h >= outRect.y + outRect.h - 0.5
-      : true;
+
+    // Selection-following frame body — wraps the SELECTED clip's
+    // content rect so a PiP overlay (content < canvas) gets a clear
+    // outline + handles around the actual clip, while a normal full-
+    // frame clip behaves identically to before (content == canvas).
+    // Visibility ties to whether there's anything to select: with no
+    // active clip the body collapses out of the way and only the
+    // canvas guide remains.
+    const hasSelection = this.editor.getSelection() != null;
+    const frameRect = contentRect ?? outRect;
+    this.frameBody.style.display = hasSelection ? "block" : "none";
+    Object.assign(this.frameBody.style, {
+      left: `${frameRect.x}px`,
+      top: `${frameRect.y}px`,
+      width: `${frameRect.w}px`,
+      height: `${frameRect.h}px`,
+    });
+    // Border warn state: only relevant when the SELECTED clip is
+    // intended to fill the canvas (scale ≈ 1). For a deliberately-
+    // shrunk PiP overlay, "content doesn't cover canvas" is the
+    // entire point — firing the red warn ring would be noise. Heuristic:
+    // suppress warn whenever the content rect is meaningfully smaller
+    // than the canvas (>5% gap on either axis). When it's near full
+    // size we still flag panning that exposes letterbox.
+    const intentionallySmall =
+      contentRect != null &&
+      (contentRect.w < outRect.w * 0.95 ||
+        contentRect.h < outRect.h * 0.95);
+    const fullyCovered =
+      intentionallySmall ||
+      (contentRect
+        ? contentRect.x <= outRect.x + 0.5 &&
+          contentRect.x + contentRect.w >= outRect.x + outRect.w - 0.5 &&
+          contentRect.y <= outRect.y + 0.5 &&
+          contentRect.y + contentRect.h >= outRect.y + outRect.h - 0.5
+        : true);
     this.frameBody.classList.toggle(
       "aicut-keyframe-overlay__frame--warn",
       !fullyCovered,
     );
-    const halfHandle = 6;
     const r = contentRect ?? outRect;
     const fbLeft = r.x;
     const fbTop = r.y;
     const fbRight = r.x + r.w;
     const fbBottom = r.y + r.h;
+    // Handle half-dim (px): corners are 12×12 squares, top/bottom
+    // edges 18×6, left/right edges 6×18 — keep in sync with the CSS.
     const place = (
       el: HTMLDivElement,
       cx: number,
       cy: number,
+      halfW: number,
+      halfH: number,
     ): void => {
-      el.style.left = `${cx - halfHandle}px`;
-      el.style.top = `${cy - halfHandle}px`;
+      el.style.left = `${cx - halfW}px`;
+      el.style.top = `${cy - halfH}px`;
     };
-    place(this.handles.tl, fbLeft, fbTop);
-    place(this.handles.tr, fbRight, fbTop);
-    place(this.handles.bl, fbLeft, fbBottom);
-    place(this.handles.br, fbRight, fbBottom);
+    place(this.handles.tl, fbLeft, fbTop, 6, 6);
+    place(this.handles.tr, fbRight, fbTop, 6, 6);
+    place(this.handles.bl, fbLeft, fbBottom, 6, 6);
+    place(this.handles.br, fbRight, fbBottom, 6, 6);
+    const midX = (fbLeft + fbRight) / 2;
+    const midY = (fbTop + fbBottom) / 2;
+    place(this.handles.t, midX, fbTop, 9, 3);
+    place(this.handles.r, fbRight, midY, 3, 9);
+    place(this.handles.b, midX, fbBottom, 9, 3);
+    place(this.handles.l, fbLeft, midY, 3, 9);
   }
 
   // ---- helpers ---------------------------------------------------------
@@ -431,9 +738,12 @@ export class KeyframeOverlay {
     };
   }
 
-  private makeHandle(name: "tl" | "tr" | "bl" | "br"): HTMLDivElement {
+  private makeHandle(name: HandleKind): HTMLDivElement {
     const el = document.createElement("div");
-    el.className = `aicut-keyframe-overlay__handle aicut-keyframe-overlay__handle--${name}`;
+    const isEdge = name.length === 1;
+    el.className =
+      `aicut-keyframe-overlay__handle aicut-keyframe-overlay__handle--${name}` +
+      (isEdge ? " aicut-keyframe-overlay__handle--edge" : "");
     el.setAttribute("data-testid", `aicut-keyframe-handle-${name}`);
     el.addEventListener("pointerdown", (e) => this.onScaleStart(name, e));
     this.root.appendChild(el);

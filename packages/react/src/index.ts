@@ -4,12 +4,15 @@ export { Timeline } from "./Timeline.js";
 export type { TimelineProps, TimelineApi } from "./Timeline.js";
 export type {
   Project,
+  ProjectOutput,
   MediaSource,
   Track,
   Clip,
   Keyframe,
   Ms,
   Theme,
+  AspectRatio,
+  PreviewLayout,
   EditorApi,
   Locale,
   PlaybackEngine,
@@ -21,6 +24,8 @@ export type {
 export {
   createEmptyProject,
   createId,
+  DEFAULT_OUTPUT_DIMS,
+  defaultOutputForAspect,
   localeEn,
   localeZh,
   HtmlVideoEngine,

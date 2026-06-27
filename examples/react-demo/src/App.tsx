@@ -16,6 +16,7 @@ import {
   htmlVideoEngineFactory,
   localeEn,
   localeZh,
+  type AspectRatio,
   type Locale,
   type PlaybackEngineFactory,
   type Project,
@@ -205,16 +206,14 @@ function FramePicker() {
  */
 type ExportAspectKey = "16:9" | "9:16" | "1:1" | "4:3";
 function ExportPopover(props: {
-  aspect: ExportAspectKey;
-  resIdx: number;
   fps: number;
-  resolutions: Record<
-    ExportAspectKey,
-    Array<{ label: string; width: number; height: number }>
-  >;
   fpsOptions: number[];
-  onChangeAspect: (a: ExportAspectKey) => void;
-  onChangeResIdx: (i: number) => void;
+  /** Aspect to display at the top of the popover — reflects the
+   *  editor's current 比例 picker. Read-only here; the user changes
+   *  it from the toolbar chip, not this menu. */
+  aspectLabel: string;
+  /** Dimensions tag shown next to the aspect (e.g., "1920×1080"). */
+  dimsLabel: string;
   onChangeFps: (f: number) => void;
   onCancel: () => void;
   onConfirm: () => void;
@@ -240,7 +239,6 @@ function ExportPopover(props: {
       document.removeEventListener("keydown", onKeydown);
     };
   }, [props]);
-  const opts = props.resolutions[props.aspect];
   return (
     <div
       ref={ref}
@@ -265,23 +263,24 @@ function ExportPopover(props: {
       }}
     >
       <div style={{ fontWeight: 600, fontSize: 13 }}>Export settings</div>
-      <Row label="比例">
-        <PopoverSelect
-          testId="demo-export-aspect"
-          value={props.aspect}
-          options={(Object.keys(props.resolutions) as ExportAspectKey[]).map(
-            (a) => ({ value: a, label: a }),
-          )}
-          onChange={(v) => props.onChangeAspect(v)}
-        />
-      </Row>
-      <Row label="分辨率">
-        <PopoverSelect
-          testId="demo-export-resolution"
-          value={props.resIdx}
-          options={opts.map((r, i) => ({ value: i, label: r.label }))}
-          onChange={(v) => props.onChangeResIdx(v)}
-        />
+      <Row label="尺寸">
+        <span
+          data-testid="demo-export-dims"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            height: 28,
+            padding: "0 10px",
+            fontSize: 12,
+            color: "var(--aicut-controls-text, rgba(255,255,255,0.85))",
+            background: "var(--aicut-controls-hover, rgba(255,255,255,0.06))",
+            border:
+              "1px solid var(--aicut-controls-border, rgba(255,255,255,0.12))",
+            borderRadius: 6,
+          }}
+        >
+          {props.aspectLabel} · {props.dimsLabel}
+        </span>
       </Row>
       <Row label="帧率">
         <PopoverSelect
@@ -722,41 +721,8 @@ export function App() {
   // dimensions. The keyframe-compilation branch on the backend is
   // ALSO gated on width+height, so silently exporting at "no dims"
   // would skip animation entirely — bug we just fixed.
-  type ExportAspect = "16:9" | "9:16" | "1:1" | "4:3";
-  const RESOLUTIONS: Record<
-    ExportAspect,
-    Array<{ label: string; width: number; height: number }>
-  > = {
-    "16:9": [
-      { label: "480p (854×480)", width: 854, height: 480 },
-      { label: "720p (1280×720)", width: 1280, height: 720 },
-      { label: "1080p (1920×1080)", width: 1920, height: 1080 },
-      { label: "1440p (2560×1440)", width: 2560, height: 1440 },
-      { label: "4K (3840×2160)", width: 3840, height: 2160 },
-    ],
-    "9:16": [
-      { label: "480p (480×854)", width: 480, height: 854 },
-      { label: "720p (720×1280)", width: 720, height: 1280 },
-      { label: "1080p (1080×1920)", width: 1080, height: 1920 },
-    ],
-    "1:1": [
-      { label: "720×720", width: 720, height: 720 },
-      { label: "1080×1080", width: 1080, height: 1080 },
-      { label: "1440×1440", width: 1440, height: 1440 },
-    ],
-    "4:3": [
-      { label: "480p (640×480)", width: 640, height: 480 },
-      { label: "720p (1024×768)", width: 1024, height: 768 },
-      { label: "1080p (1440×1080)", width: 1440, height: 1080 },
-    ],
-  };
   const FPS_OPTIONS = [24, 30, 60];
   const [exportPopoverOpen, setExportPopoverOpen] = useState(false);
-  const [exportAspect, setExportAspect] = useState<ExportAspect>("16:9");
-  // Index into RESOLUTIONS[exportAspect] — keep as index so changing
-  // aspect can fall back to "same tier" (e.g. 1080p) without remembering
-  // the old (w, h) tuple. Default to 1080p slot for 16:9.
-  const [exportResIdx, setExportResIdx] = useState(2);
   const [exportFps, setExportFps] = useState(30);
   const [showToolbarLeft, setShowToolbarLeft] = useState(true);
   // Free-form text shown inside the `toolbarLeft` slot — proves the
@@ -765,6 +731,14 @@ export function App() {
   const [projectName, setProjectName] = useState("Untitled cut");
   const [showToolbarRight, setShowToolbarRight] = useState(true);
   const [showHeader, setShowHeader] = useState(true);
+  // Preview layout — `fullWidth` is the legacy behavior; `centered`
+  // pins the preview to the middle third and reveals the panelLeft /
+  // panelRight slots (CapCut-desktop style 3-column main row).
+  const [previewLayout, setPreviewLayout] =
+    useState<"fullWidth" | "centered">("centered");
+  // Min pixel gap between ruler major ticks — controls how dense the
+  // timeline labels are at the current zoom. 80 is the library default.
+  const [rulerMinTickPx, setRulerMinTickPx] = useState(80);
   const [backendKind, setBackendKind] = useState<"ts" | "go">("ts");
   const [localeName, setLocaleName] = useState<"en" | "zh">("en");
   const locale: Locale = useMemo(
@@ -782,7 +756,7 @@ export function App() {
   const webCodecsAvailable = isWebCodecsSupported();
   const [engineKind, setEngineKind] = useState<
     "html" | "canvas" | "webcodecs"
-  >("html");
+  >("canvas");
   // Demo of EditorOptions.trackHeight — shrinking each track row
   // tightens the timeline footprint. setTimelineMetrics is applied
   // at construction so changes here force a remount via `key`.
@@ -796,11 +770,17 @@ export function App() {
   // routes the canvas / WebCodecs engines through the transform
   // pipeline. Data round-trips either way, so flipping off and back on
   // doesn't lose the keyframes.
-  const [keyframesEnabled, setKeyframesEnabled] = useState<boolean>(false);
+  const [keyframesEnabled, setKeyframesEnabled] = useState<boolean>(true);
   // Jump-to-clip-edge nav cluster (|◀ ▶|) + I/O keyboard shortcuts.
   // Off by default — the buttons take toolbar space and the I/O keys
   // would shadow page typing, so hosts opt in like they do for kfs.
-  const [clipEdgeNavEnabled, setClipEdgeNavEnabled] = useState<boolean>(false);
+  const [clipEdgeNavEnabled, setClipEdgeNavEnabled] = useState<boolean>(true);
+  // Multi-track PiP — controlled by the editor's built-in toolbar
+  // toggle (configured via `pictureInPicture.toolbarToggle: true`
+  // below). We mirror the state into React via the editor's
+  // `pictureInPictureEnabledChange` event so the toolbar's chip
+  // and the demo's chrome stay in sync.
+  const [pipEnabled, setPipEnabled] = useState<boolean>(true);
   const playbackEngine: PlaybackEngineFactory = useMemo(() => {
     if (engineKind === "canvas") {
       return (opts) => new CanvasCompositorEngine({ ...opts, debug: true });
@@ -820,7 +800,7 @@ export function App() {
 
   const runBackendExport = async (
     project: Project,
-    output: { width: number; height: number; fps: number },
+    output: { width?: number; height?: number; fps: number },
   ): Promise<void> => {
     exportAbortRef.current?.abort();
     const ac = new AbortController();
@@ -939,6 +919,124 @@ export function App() {
     exportAbortRef.current?.abort();
   };
 
+  // Hidden file input the toolbar "+ PiP overlay" button drives.
+  const pipFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  /**
+   * Wired to the editor's `requestPictureInPictureAdd` event — when
+   * the toolbar's "+ PiP overlay" button fires, surface a file
+   * picker. The picked file flows through the same upload pipeline
+   * as the sidebar (server upload when configured, else local blob
+   * URL); the resulting clip lands on a fresh video track so it
+   * stacks on top of the main track per the engine's z-order
+   * convention.
+   */
+  const triggerPipUpload = (): void => {
+    pipFileInputRef.current?.click();
+  };
+
+  const handlePipFile = async (file: File): Promise<void> => {
+    const api = apiRef.current;
+    if (!api) {
+      toast.push("Editor isn't ready yet — try again in a moment.", { variant: "warn" });
+      return;
+    }
+    let url: string;
+    let isLocal: boolean;
+    try {
+      if (UPLOAD_ENDPOINT) {
+        const form = new FormData();
+        form.append("file", file, file.name);
+        const res = await fetch(UPLOAD_ENDPOINT, { method: "POST", body: form });
+        if (!res.ok) throw new Error(`Upload failed: HTTP ${res.status}`);
+        const data = (await res.json()) as { url?: string };
+        if (!data.url) throw new Error("Upload response missing `url` field");
+        url = data.url;
+        isLocal = false;
+      } else {
+        url = URL.createObjectURL(file);
+        isLocal = true;
+        toast.push(
+          "VITE_UPLOAD_ENDPOINT not set — the PiP overlay uses a local blob URL. Playable in this browser only, can't be exported.",
+          { variant: "warn", duration: 5000 },
+        );
+      }
+    } catch (e) {
+      toast.push(`PiP upload error: ${e instanceof Error ? e.message : String(e)}`, {
+        variant: "error",
+      });
+      return;
+    }
+    // Probe duration via a transient <video>.
+    const durationMs = await new Promise<number | undefined>((resolve) => {
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.muted = true;
+      v.src = url;
+      const timeout = setTimeout(() => resolve(undefined), 5000);
+      v.onloadedmetadata = () => {
+        clearTimeout(timeout);
+        const ms = Math.round(v.duration * 1000);
+        resolve(Number.isFinite(ms) && ms > 0 ? ms : undefined);
+      };
+      v.onerror = () => {
+        clearTimeout(timeout);
+        resolve(undefined);
+      };
+    });
+
+    const project = api.getProject();
+    const sourceId = createId("src");
+    const clipId = createId("clip");
+    // Find the first non-track-0 video track without overlapping
+    // clips at the playhead; create a fresh track when there's none.
+    const playhead = api.getTime();
+    const overlayTrackIdx = project.tracks.findIndex((t, i) => {
+      if (t.kind !== "video") return false;
+      if (i === 0) return false;
+      return !t.clips.some(
+        (c) => playhead >= c.start && playhead < c.start + (c.out - c.in),
+      );
+    });
+    const usableDurationMs = durationMs ?? 5000;
+    const newClip = {
+      id: clipId,
+      sourceId,
+      in: 0,
+      out: usableDurationMs,
+      // Land at the playhead so the user sees the PiP overlay
+      // immediately at the current preview time.
+      start: playhead,
+      // Centered + scaled — pre-seeds the PiP as a small frame
+      // inside the canvas. User drags from there.
+      scale: 0.4,
+    };
+    const next: Project = {
+      ...project,
+      sources: [
+        ...project.sources,
+        { id: sourceId, url, kind: "video", name: file.name, duration: durationMs },
+      ],
+      tracks:
+        overlayTrackIdx >= 0
+          ? project.tracks.map((t, i) =>
+              i === overlayTrackIdx ? { ...t, clips: [...t.clips, newClip] } : t,
+            )
+          : [
+              ...project.tracks,
+              {
+                id: createId("track"),
+                kind: "video" as const,
+                clips: [newClip],
+              },
+            ],
+    };
+    api.setProject(next);
+    if (!isLocal) {
+      toast.push(`Added PiP overlay: ${file.name}`, { variant: "success" });
+    }
+  };
+
   /**
    * Handler the UploadPanel calls after a video resolves to a URL
    * (either a server-uploaded http URL or a local blob URL). Adds the
@@ -1021,21 +1119,21 @@ export function App() {
           playbackEngine={playbackEngine}
           trackHeight={trackHeight}
           timelineHeight={timelineHeight}
+          pictureInPicture={{
+            enabled: pipEnabled,
+            // Surface the "+ PiP overlay" toolbar action so users
+            // can trigger an upload from inside the editor. The
+            // ENABLE flag stays a host concern (sidebar checkbox);
+            // the toolbar button is purely "add a PiP", not a
+            // toggle.
+            toolbarAdd: true,
+          }}
+          onPictureInPictureAddRequested={triggerPipUpload}
           keyframes={{ enabled: keyframesEnabled }}
           clipEdgeNav={{ enabled: clipEdgeNavEnabled }}
           aspect={{ enabled: true }}
-          onAspectChange={(a) => {
-            // Built-in picker drives the demo's export aspect default
-            // — pickers in real hosts wire to whatever output settings
-            // they own (preview letterbox, ffmpeg dims, etc.).
-            if (a == null) return; // "Original" keeps the current export aspect
-            if (a === "16:9" || a === "9:16" || a === "1:1" || a === "4:3") {
-              setExportAspect(a);
-              setExportResIdx((i) =>
-                Math.min(i, RESOLUTIONS[a].length - 1),
-              );
-            }
-          }}
+          previewLayout={previewLayout}
+          rulerMinTickPx={rulerMinTickPx}
           style={{ height: "100%" }}
           headerLeft={
             showHeader ? (
@@ -1077,41 +1175,44 @@ export function App() {
                   >
                     {exportStatus.running ? "Exporting…" : "Export"}
                   </button>
-                  {exportPopoverOpen && !exportStatus.running ? (
-                    <ExportPopover
-                      aspect={exportAspect}
-                      resIdx={exportResIdx}
-                      fps={exportFps}
-                      onChangeAspect={(a) => {
-                        setExportAspect(a);
-                        setExportResIdx((i) =>
-                          Math.min(i, RESOLUTIONS[a].length - 1),
-                        );
-                      }}
-                      onChangeResIdx={setExportResIdx}
-                      onChangeFps={setExportFps}
-                      onCancel={() => setExportPopoverOpen(false)}
-                      onConfirm={() => {
-                        const api = apiRef.current;
-                        if (!api) {
-                          setExportStatus({
-                            running: false,
-                            error: "Editor API not ready yet",
-                          });
-                          return;
+                  {exportPopoverOpen && !exportStatus.running ? (() => {
+                    const liveAspect =
+                      apiRef.current?.getAspect() ?? null;
+                    // Authoritative canvas dims — `Project.output`
+                    // (set whenever the user picks an aspect). Falls
+                    // back to the source-anchor when the project is
+                    // mid-load. Pixel-for-pixel == export dims.
+                    const out = apiRef.current?.getOutput();
+                    return (
+                      <ExportPopover
+                        fps={exportFps}
+                        aspectLabel={liveAspect ?? "Original"}
+                        dimsLabel={
+                          out ? `${out.width}×${out.height}` : "源素材尺寸"
                         }
-                        setExportPopoverOpen(false);
-                        setExportStatus({
-                          running: true,
-                          overall: 0,
-                          phase: "encode",
-                        });
-                        api.requestExport();
-                      }}
-                      resolutions={RESOLUTIONS}
-                      fpsOptions={FPS_OPTIONS}
-                    />
-                  ) : null}
+                        onChangeFps={setExportFps}
+                        onCancel={() => setExportPopoverOpen(false)}
+                        onConfirm={() => {
+                          const api = apiRef.current;
+                          if (!api) {
+                            setExportStatus({
+                              running: false,
+                              error: "Editor API not ready yet",
+                            });
+                            return;
+                          }
+                          setExportPopoverOpen(false);
+                          setExportStatus({
+                            running: true,
+                            overall: 0,
+                            phase: "encode",
+                          });
+                          api.requestExport();
+                        }}
+                        fpsOptions={FPS_OPTIONS}
+                      />
+                    );
+                  })() : null}
                 </span>
               </>
             ) : null
@@ -1159,16 +1260,30 @@ export function App() {
               setSelectedClipId(clipId),
             );
             api.on("historyChange", (h) => setHistoryState(h));
+            api.on("pictureInPictureEnabledChange", ({ enabled }) =>
+              setPipEnabled(enabled),
+            );
 
             // Build clips as each source's metadata resolves. The core
             // `ready` event fires per-source with the duration already
-            // applied to `getProject().sources[].duration`.
+            // applied to `getProject().sources[].duration`. Only
+            // auto-seeds when the source has NO existing clip anywhere
+            // — host code (e.g. multi-track PiP setups, scripted
+            // setProject calls) that already arranged clips for the
+            // source doesn't get its layout clobbered.
             const seeded = new Set<string>();
             api.on("ready", ({ sourceId }) => {
               if (!sourceId || seeded.has(sourceId)) return;
               const project = api.getProject();
               const src = project.sources.find((s) => s.id === sourceId);
               if (!src?.duration) return;
+              const alreadyHasClip = project.tracks.some((t) =>
+                t.clips.some((c) => c.sourceId === sourceId),
+              );
+              if (alreadyHasClip) {
+                seeded.add(sourceId);
+                return;
+              }
               const track = project.tracks.find((t) => t.kind === "video");
               if (!track) return;
               const start = track.clips.reduce(
@@ -1189,13 +1304,24 @@ export function App() {
           onChange={(p) => setSavedJson(JSON.stringify(p, null, 2))}
           onExport={(p) => {
             setExportJson(JSON.stringify(p, null, 2));
-            const res = RESOLUTIONS[exportAspect][exportResIdx]
-              ?? RESOLUTIONS[exportAspect][0]!;
-            void runBackendExport(p, {
-              width: res.width,
-              height: res.height,
-              fps: exportFps,
-            });
+            // The project carries its own `output` (set by the aspect
+            // chip / editor.setOutput). Backend uses it as the
+            // authoritative canvas — preview == export. We only pass
+            // fps overrides; dims travel in the project JSON itself.
+            void runBackendExport(p, { fps: exportFps });
+          }}
+        />
+        {/* Hidden — driven by the toolbar "+ PiP overlay" button. */}
+        <input
+          ref={pipFileInputRef}
+          type="file"
+          accept="video/*"
+          style={{ display: "none" }}
+          data-testid="demo-pip-file-input"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void handlePipFile(f);
+            e.target.value = "";
           }}
         />
       </div>
@@ -1321,6 +1447,25 @@ export function App() {
           </p>
         </div>
 
+        <h2>Picture-in-picture</h2>
+        <div className="demo-row demo-checkbox-row">
+          <label>
+            <input
+              type="checkbox"
+              data-testid="demo-pip-toggle"
+              checked={pipEnabled}
+              onChange={(e) => setPipEnabled(e.target.checked)}
+            />
+            <span>Enable multi-track preview compositing</span>
+          </label>
+        </div>
+        <p className="demo-engine-help">
+          Toggle compositing here. The toolbar's "+ PiP overlay"
+          button uploads a video onto a new overlay track (centered
+          + scale 0.4). Higher tracks paint on top; lower tracks
+          mute their audio.
+        </p>
+
         <h2>Keyframes</h2>
         <div className="demo-row demo-checkbox-row">
           <label>
@@ -1387,6 +1532,57 @@ export function App() {
             />
             <span>Right (Export)</span>
           </label>
+        </div>
+
+        <h2>Preview layout</h2>
+        <div className="demo-row demo-checkbox-row">
+          <label>
+            <input
+              type="radio"
+              name="demo-preview-layout"
+              data-testid="demo-preview-layout-fullwidth"
+              checked={previewLayout === "fullWidth"}
+              onChange={() => setPreviewLayout("fullWidth")}
+            />
+            <span>Full width</span>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="demo-preview-layout"
+              data-testid="demo-preview-layout-centered"
+              checked={previewLayout === "centered"}
+              onChange={() => setPreviewLayout("centered")}
+            />
+            <span>Centered (3-column)</span>
+          </label>
+        </div>
+        <p className="demo-help">
+          Centered pins the preview to the middle third and surfaces
+          `panelLeft` / `panelRight` slots flanking it — CapCut-desktop
+          layout. The toolbar's play / time / fullscreen controls always
+          live as an overlay inside the preview area.
+        </p>
+
+        <h2>Timeline ticks</h2>
+        <div className="demo-row demo-track-height-row">
+          <label>
+            Min pixel gap between major ticks: <strong>{rulerMinTickPx}px</strong>
+          </label>
+          <input
+            type="range"
+            min={40}
+            max={160}
+            step={10}
+            data-testid="demo-ruler-tick-px"
+            value={rulerMinTickPx}
+            onChange={(e) => setRulerMinTickPx(Number(e.target.value))}
+          />
+          <p className="demo-help">
+            Lower packs labels denser (every 0.2s at high zoom), higher
+            spaces them further apart. Reactive — the canvas re-paints
+            on every change.
+          </p>
         </div>
 
         <h2>Persistence</h2>

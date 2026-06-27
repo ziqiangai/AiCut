@@ -1,6 +1,6 @@
 {
   "name": "@aicut/vue",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Vue 3 wrapper for the AiCut video editor + lighting picker — thin declarative shells over @aicut/core.",
   "license": "MIT",
   "author": "ziqiang <ziqiangytu@gmail.com>",

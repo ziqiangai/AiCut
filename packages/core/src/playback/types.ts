@@ -57,8 +57,14 @@ export interface PlaybackEngine {
    * This rect does NOT change with the active transform — it's
    * the stage. The overlay's dashed border is drawn here. Coords
    * relative to `opts.host`. Returns null when no clip is active.
+   *
+   * `clipId` (optional, PiP-aware engines): identify a specific
+   * active clip. Lower-track PiP clips share the same canvas as
+   * the primary, so this still returns the canvas rect — but the
+   * argument keeps the API symmetric with `getFrameRect` and makes
+   * intent explicit at call sites.
    */
-  getOutputFrameRect?(): { x: number; y: number; w: number; h: number } | null;
+  getOutputFrameRect?(clipId?: string): { x: number; y: number; w: number; h: number } | null;
 
   /**
    * Optional. Return the screen-space CSS-pixel rectangle of the
@@ -70,8 +76,43 @@ export interface PlaybackEngine {
    *
    * Returns null when no clip is active. Engines that don't expose
    * this leave keyframe handles attached to the output frame instead.
+   *
+   * `clipId` (optional): with PiP / multi-track, the overlay needs
+   * the rect of the SELECTED clip rather than the primary track's
+   * — that's how the dashed frame + corner handles latch onto a
+   * picture-in-picture overlay when the user selects it. Engines
+   * that don't support PiP can ignore the argument and always
+   * return the single active clip's rect.
    */
-  getFrameRect?(): { x: number; y: number; w: number; h: number } | null;
+  getFrameRect?(clipId?: string): { x: number; y: number; w: number; h: number } | null;
+
+  /**
+   * Optional. Return the intrinsic dimensions in CANVAS PIXELS of the
+   * authoring canvas — the reference frame keyframe pan/scale values
+   * are stored in. When `Project.output` is set this returns those
+   * dims; otherwise engines fall back to "anchor" semantics (first
+   * clip on the bottom track) so legacy projects without `output`
+   * still resolve to a stable canvas across clip boundaries.
+   *
+   * Tuple form is `[width, height]`. Returns null when no source has
+   * decoded enough to know the anchor dims yet.
+   */
+  getCanvasReferenceDims?(): [number, number] | null;
+
+  /**
+   * Optional. Toggle multi-track compositing. When `true`, the engine
+   * paints every video track's currently-active clip at the playhead
+   * with track `0` on top (matching the timeline's visual top-to-
+   * bottom = top-to-bottom z-order). When `false` (default), only
+   * track `0`'s active clip paints — today's single-clip behaviour.
+   *
+   * Engines that don't implement this are documented as PiP-incapable
+   * in the README; the Editor falls back to single-track regardless
+   * of the flag. Same opt-in pattern as keyframes — data is preserved
+   * (extra-track clips remain in the project), only the painted
+   * preview changes.
+   */
+  setPictureInPictureEnabled?(enabled: boolean): void;
 
   // ---- Event hooks — set by the Editor after construction. Engines
   // call these when state changes. All optional; engines that can't
