@@ -189,14 +189,18 @@ Switching at runtime is a regular prop change — the toolbar re-titles and the 
 
 ## 🧩 Custom slots
 
-Four host-fillable slots on the editor — empty by default, no chrome cost. The same pattern is the standalone `<Timeline>`'s `toolbarLeft`/`toolbarRight` props.
+Six host-fillable slots on the editor — empty by default, no chrome cost. The same pattern is the standalone `<Timeline>`'s `toolbarLeft`/`toolbarRight` props.
 
 | Slot | Where | Typical use |
 | :--- | :--- | :--- |
 | `headerLeft` | Top header, left | Project name, file menu, breadcrumbs |
 | `headerRight` | Top header, right | Share / Export / profile / settings |
-| `toolbarLeft` | Toolbar, left bookend | Aspect ratio, size, branding |
+| `toolbarLeft` | Toolbar, left bookend | Project name, status pill, branding |
 | `toolbarRight` | Toolbar, right bookend | Custom action icons |
+| `panelLeft` | Main row, left of preview (centered layout) | Source library, media bin, generators |
+| `panelRight` | Main row, right of preview (centered layout) | Inspector, properties, AI tools |
+
+The two `panel*` slots only render when `previewLayout="centered"` (the default — see [Preview layout](#-preview-layout-3-column--full-width) below). The aspect chip is now built into the toolbar, so `toolbarLeft` is free for whatever else.
 
 When both `headerLeft` and `headerRight` are empty the header bar collapses entirely — the default editor layout is byte-for-byte identical to before the slots existed.
 
@@ -213,24 +217,60 @@ When both `headerLeft` and `headerRight` are empty the header bar collapses enti
     </>
   }
   // Toolbar bookends — independent slots.
-  toolbarLeft={
-    <select value={aspect} onChange={(e) => setAspect(e.target.value)}>
-      <option value="16:9">16:9</option>
-      <option value="9:16">9:16</option>
-      <option value="1:1">1:1</option>
-    </select>
-  }
-  toolbarRight={
-    <button onClick={() => apiRef.current?.requestExport()}>Export</button>
-  }
+  toolbarLeft={<ProjectNameInput value={name} onChange={setName} />}
+  toolbarRight={<ExportStatusPill status={exportStatus} />}
+  // CapCut-desktop-style side rails — only render in centered layout.
+  panelLeft={<MediaBin sources={sources} onPickClip={addClip} />}
+  panelRight={<InspectorPanel clip={selectedClip} />}
 />
 ```
+
+---
+
+## 🖼 Preview layout (3-column / full-width)
+
+The editor ships two top-level layouts, picked via `previewLayout`:
+
+| Layout | Behaviour | When to use |
+| :--- | :--- | :--- |
+| `"centered"` (default) | Preview lives in a width-capped card in the middle third of the row, with `panelLeft` / `panelRight` slots flanking it. | CapCut-desktop posture — host owns a media library / inspector. |
+| `"fullWidth"` | Preview spans the entire row, no side columns. | Embeds where the host doesn't need side panels. |
+
+Playback controls (time · play · duration · fullscreen) sit as a footer on the preview card in both layouts, not on top of the canvas — keyframe handles and the canvas guide stay unobstructed.
+
+```tsx
+<VideoEditor
+  previewLayout="centered"      // or "fullWidth"
+  panelLeft={<MediaBin />}
+  panelRight={<Inspector />}
+/>
+```
+
+The layout switch is reactive — flip the prop and the chrome rearranges without remounting the editor.
+
+---
+
+## 🖍 Project canvas
+
+Every spatial value in a project — keyframe `panX`/`panY`, the canvas guide rect, the export resolution — lives in **one coordinate system**, the project canvas:
+
+```ts
+project.output = { width: 1920, height: 1080, fps: 30 };
+```
+
+The preview is just a scaled view of this canvas. The export writes exactly these dimensions. Pan/scale are in canvas pixels, not preview pixels, so a project authored on a 720×720 tab and rendered on a 4K screen lands every transform identically.
+
+- `editor.setAspect("9:16")` updates `Project.output` to the 1080p tier for that ratio (1080×1920). Hosts can override with `editor.setOutput({ width, height, fps })`.
+- The backend export reads `Project.output` first; explicit `output` in the request body overrides.
+- Legacy projects without `output`: `normalizeProject` derives one from `aspect` or the first clip's intrinsic source dims (CapCut "Original" behaviour), so old JSON round-trips without manual migration.
 
 ---
 
 ## 🎞 Keyframe animation
 
 CapCut-style **per-property keyframes** for `panX`, `panY`, and `scale` — pin a value at any moment, the engine animates between them. Authored in the editor, previewed live by any playback engine, **compiled to ffmpeg expressions on export** so the rendered mp4 matches the preview frame-for-frame.
+
+`panX` / `panY` are stored in **canvas pixels** of `Project.output` (see [Project canvas](#-project-canvas)). One pan unit = one pixel in the export, regardless of preview size — so the same project rendered on a small embed and a full-screen tab lands every keyframe in the same place.
 
 ```ts
 clip.keyframes = [
@@ -244,7 +284,7 @@ clip.keyframes = [
 | :--- | :--- |
 | **Per-property model** | `panX` / `panY` / `scale` animate independently. Pre-easing tuple-keyframes auto-migrate via `normalizeProject`. |
 | **Easing curves** | `linear` / `easeIn` / `easeOut` / `easeInOut` (cubic). Stored on the leaving kf — matches AE / Premiere / CapCut convention. Omitted = linear (back-compat). |
-| **Editor UI** | Toolbar diamond toggle, draggable preview overlay (translate body / scale corners / pinch wheel), floating numeric panel with easing dropdown, **timeline diamond markers** with drag-to-retime + snap. |
+| **Editor UI** | Toolbar diamond toggle, draggable preview overlay (translate body / scale corners / pinch wheel), floating numeric panel with easing dropdown, **timeline diamond markers** with drag-to-retime (drags the whole moment — every prop pinned at the same time travels together) + snap. |
 | **Backend export** | `compileKeyframeExpression` emits a `gte(t,A)*lt(t,B)*…` sum compiled into `scale=...:eval=frame` + `overlay=…:eval=frame` filters. Both `@aicut/backend-ts` and `@aicut/backend-go` support it identically. |
 | **PiP semantics** | Output frame is fixed; pan/scale moves the *content* inside it (`overflow: hidden` in the HTML engine, `ctx.clip()` in canvas, ffmpeg `overlay` onto a fixed-size `color` background on the backend). |
 | **Lossless splits** | `splitClipAt` mid-segment **inserts interpolated boundary keyframes** so cutting and not moving the halves plays back identically to the un-cut clip. |
@@ -291,10 +331,17 @@ POST /export                                    Content-Type: application/json
   data: {"phase":"concat","overall":0.99,"totalClips":3}
   data: {"phase":"done","fileUrl":"/files/<uuid>.mp4","id":"<uuid>"}
 
-GET  /files/<uuid>.mp4                          → video/mp4
+POST /upload (multipart, field "file")          → { url, id, name }
+GET  /files/<uuid>.<ext>                        → video/* (with HTTP Range support)
 ```
 
-`out_time_us` from ffmpeg's `-progress` stream is aggregated across the per-clip encode passes, so the overall fraction is honest end-to-end. Aborting the client connection (or AbortController on the fetch) kills the in-flight ffmpeg.
+Output dimensions resolve in priority order: explicit `output` in the request body → `Project.output` → ffprobe of the bottom track's first clip → 1920×1080. With `Project.output` set (default behaviour from the editor), the request body's `output` is purely an override.
+
+The TS backend runs the entire timeline through a **single `filter_complex` pass** — bottom track painted onto a black `color=` canvas first, each higher track overlaid with `enable='between(t,start,end)'` so PiP windows respect their lifetimes. Keyframe `panX`/`panY`/`scale` compile to per-frame ffmpeg expressions; the compositor renders at 2× internal resolution and downsamples with lanczos so sub-pixel motion stays smooth. Audio: only the top track contributes (matching the editor's PiP policy), mixed via `amix`.
+
+`out_time_us` from ffmpeg's `-progress` stream feeds the overall fraction. Aborting the client connection (or AbortController on the fetch) kills the in-flight ffmpeg.
+
+The Go backend still uses the per-clip + concat strategy and ignores cross-track compositing — slated for parity in a follow-up release.
 
 <div align="center">
 
@@ -497,6 +544,12 @@ The script is idempotent — already-published versions are skipped, so a re-run
 - [x] Density knobs — `timelineHeight` (reactive), `trackHeight`, `rulerHeight` for compact viewports
 - [x] Per-clip keyframe animation (X / Y / Scale) + easing curves (linear / easeIn / easeOut / easeInOut)
 - [x] Backend ffmpeg compilation of keyframes — animated `scale` + `overlay` filter graph with per-frame `t`-expressions, both TS + Go
+- [x] Multi-track timeline export (PiP-aware compositor in TS backend — single `filter_complex` pass with per-track overlay + `enable` windows)
+- [x] Source-of-truth project canvas (`Project.output`) — pan/scale in canvas pixels, preview/export pixel-for-pixel
+- [x] 3-column preview layout + `panelLeft`/`panelRight` host slots (CapCut-desktop posture)
+- [x] Frame-aware timeline ruler — seconds first, frame sub-ticks at high zoom (`rulerMinTickPx` knob)
+- [x] Backend upload endpoint + HTTP Range support (QuickTime `.mov` with trailing moov streams correctly)
+- [ ] Go backend parity with TS multi-track compositor
 - [ ] Speed adjustment (timeline already reserves the slot)
 - [ ] Audio track rendering + waveform thumbnails
 - [ ] WebCodecs engine: multi-track compositing + transitions
