@@ -1,6 +1,7 @@
 export { Editor } from "./editor.js";
 export type {
   EditorOptions,
+  HeadlessEditorOptions,
   EditorApi,
   EditorEventMap,
   EditorEventName,

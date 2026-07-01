@@ -45,7 +45,53 @@ import {
 } from "./keyframes/index.js";
 import { EditorUI } from "./ui/index.js";
 
-export interface EditorOptions {
+/**
+ * State-only knobs that ALL editor entry points accept — used by the
+ * headless (`createHeadless`) path AND the mounted `create` path.
+ * Split from `EditorOptions` so React's `<EditorProvider>` and Vue's
+ * `useAicutEditor()` can spin up an Editor without a mount container
+ * and each primitive component (`<Preview>`, `<Timeline>`, buttons,
+ * …) mounts its own DOM independently.
+ */
+export interface HeadlessEditorOptions {
+  /** Initial project state. Falls back to an empty single-track project. */
+  project?: Project;
+  /** CSS variable overrides — applied by `editor.applyThemeTo(el)`. */
+  theme?: Theme;
+  /** Initial playhead position (ms). */
+  initialTime?: Ms;
+  /** Initial timeline zoom (pixels per second). Defaults to 80. */
+  initialScale?: number;
+  /** Initial snap toggle. Defaults to true. */
+  initialSnap?: boolean;
+  /**
+   * UI string overrides. Falls back to English (`localeEn`) for any
+   * keys not provided. Use `localeZh` as the value for full Chinese.
+   */
+  locale?: Partial<Locale>;
+  /**
+   * Optional factory for a custom playback engine. Receives the
+   * preview host element + the initial project, returns anything
+   * satisfying `PlaybackEngine`. Defaults to the built-in
+   * `HtmlVideoEngine`. The engine is created LAZILY on
+   * `editor.attachPreview(host)` — headless editors have no engine
+   * until a Preview primitive mounts.
+   */
+  playbackEngine?: PlaybackEngineFactory;
+  /** See `EditorOptions`. */
+  trackHeight?: number;
+  rulerHeight?: number;
+  timelineHeight?: number;
+  rulerMinTickPx?: number;
+  keyframes?: { enabled?: boolean };
+  clipEdgeNav?: { enabled?: boolean };
+  previewFrame?: { enabled?: boolean };
+  pictureInPicture?: { enabled?: boolean; toolbarAdd?: boolean };
+  aspect?: { enabled?: boolean };
+  previewLayout?: PreviewLayout;
+}
+
+export interface EditorOptions extends HeadlessEditorOptions {
   /** Host element to mount the editor into. Will be wiped on init. */
   container: HTMLElement;
   /** Initial project state. Falls back to an empty single-track project. */
@@ -537,6 +583,14 @@ export interface EditorApi {
    * its own controls (e.g. an aspect-ratio dropdown). Empty by default
    * and renders no separator until populated.
    */
+  /**
+   * Preview host element the playback engine paints into. React /
+   * Vue `<Preview>` primitives teleport this into their own slots via
+   * `appendChild`. Available in both mounted mode (returns the built-in
+   * UI's preview host) and headless mode (returns the detached
+   * `.aicut-preview-host` div created in the constructor).
+   */
+  readonly previewHost: HTMLElement;
   readonly toolbarLeft: HTMLElement;
   /** Right-side bookend slot — conventionally export / save / share. */
   readonly toolbarRight: HTMLElement;
@@ -589,10 +643,14 @@ const SNAP_PX = 8;
  * into it, and forward events as framework-native callbacks.
  */
 export class Editor implements EditorApi {
-  private container: HTMLElement;
+  private container: HTMLElement | null;
+  /** Only populated in headless mode — the offscreen `.aicut-preview-host`
+   *  the engine paints into until a `<Preview>` primitive teleports it
+   *  into the visible tree. */
+  private detachedPreviewHost: HTMLElement | null = null;
   private project: Project;
   private engine: PlaybackEngine;
-  private ui: EditorUI;
+  private ui: EditorUI | null;
   private bus = new EventBus<EditorEventMap>();
   private history = new HistoryStack();
 
@@ -616,8 +674,8 @@ export class Editor implements EditorApi {
   private rulerMinTickPx: number;
   private destroyed = false;
 
-  constructor(opts: EditorOptions) {
-    this.container = opts.container;
+  constructor(opts: EditorOptions | (HeadlessEditorOptions & { container?: undefined | null })) {
+    this.container = opts.container ?? null;
     this.project = normalizeProject(opts.project ?? createEmptyProject());
     this.pxPerSec = clampScale(opts.initialScale ?? DEFAULT_PX_PER_SEC);
     this.snap = opts.initialSnap !== false;
@@ -644,48 +702,63 @@ export class Editor implements EditorApi {
       });
     }
 
-    applyTheme(this.container, opts.theme);
-    if (opts.timelineHeight != null && opts.timelineHeight > 0) {
-      // CSS custom property — `.aicut-timeline` reads it via var() so
-      // every editor instance can have its own height even though we
-      // share the class. Falls back to 240px when unset.
-      this.container.style.setProperty(
-        "--aicut-timeline-height",
-        `${Math.round(opts.timelineHeight)}px`,
-      );
+    if (this.container) {
+      applyTheme(this.container, opts.theme);
+      if (opts.timelineHeight != null && opts.timelineHeight > 0) {
+        // CSS custom property — `.aicut-timeline` reads it via var() so
+        // every editor instance can have its own height even though we
+        // share the class. Falls back to 240px when unset.
+        this.container.style.setProperty(
+          "--aicut-timeline-height",
+          `${Math.round(opts.timelineHeight)}px`,
+        );
+      }
+      this.ui = new EditorUI(this.container, this, {
+        onPlayToggle: () => this.togglePlay(),
+        onSplit: () => this.split(),
+        onTrimLeft: () => this.trimLeft(),
+        onTrimRight: () => this.trimRight(),
+        onUndo: () => this.undo(),
+        onRedo: () => this.redo(),
+        onReset: () => this.reset(),
+        onFullscreen: () => this.ui?.toggleFullscreen(),
+        onSnapToggle: () => this.setSnap(!this.snap),
+        onScaleChange: (s) => this.setScale(s),
+        onSeek: (t) => this.seek(t),
+        onSelectClip: (id) => this.setSelection(id),
+        onDeleteClip: (id) => this.removeClip(id),
+        onMoveClip: (id, opts) => this.moveClip(id, opts),
+        onResizeClip: (id, edits) => this.resizeClip(id, edits),
+        onSelectKeyframe: (target) => this.setSelectedKeyframe(target),
+        onMoveKeyframe: (clipId, keyframeId, timeMs) =>
+          this.moveKeyframe(clipId, keyframeId, timeMs),
+        onKeyframeToggle: () => this.toggleKeyframeAtPlayhead(),
+        onSeekClipStart: () => this.seekToSelectedClipEdge("start"),
+        onSeekClipEnd: () => this.seekToSelectedClipEdge("end"),
+        onAspectChange: (a) => this.setAspect(a),
+        onPictureInPictureAdd: () =>
+          this.bus.emit("requestPictureInPictureAdd", undefined),
+      });
+    } else {
+      // Headless: no container, no built-in UI. Primitives mount their
+      // own DOM and drive the engine via the editor API. Theme is
+      // applied per-container by the host via `editor.applyThemeTo(el)`.
+      this.ui = null;
     }
 
-    this.ui = new EditorUI(this.container, this, {
-      onPlayToggle: () => this.togglePlay(),
-      onSplit: () => this.split(),
-      onTrimLeft: () => this.trimLeft(),
-      onTrimRight: () => this.trimRight(),
-      onUndo: () => this.undo(),
-      onRedo: () => this.redo(),
-      onReset: () => this.reset(),
-      onFullscreen: () => this.ui.toggleFullscreen(),
-      onSnapToggle: () => this.setSnap(!this.snap),
-      onScaleChange: (s) => this.setScale(s),
-      onSeek: (t) => this.seek(t),
-      onSelectClip: (id) => this.setSelection(id),
-      onDeleteClip: (id) => this.removeClip(id),
-      onMoveClip: (id, opts) => this.moveClip(id, opts),
-      onResizeClip: (id, edits) => this.resizeClip(id, edits),
-      onSelectKeyframe: (target) => this.setSelectedKeyframe(target),
-      onMoveKeyframe: (clipId, keyframeId, timeMs) =>
-        this.moveKeyframe(clipId, keyframeId, timeMs),
-      onKeyframeToggle: () => this.toggleKeyframeAtPlayhead(),
-      onSeekClipStart: () => this.seekToSelectedClipEdge("start"),
-      onSeekClipEnd: () => this.seekToSelectedClipEdge("end"),
-      onAspectChange: (a) => this.setAspect(a),
-      onPictureInPictureAdd: () =>
-        this.bus.emit("requestPictureInPictureAdd", undefined),
-    });
+    // Engine host: use the built-in UI's preview-host when mounted, or
+    // a detached div in headless. The detached div isn't attached to
+    // document — canvas / <video> still render into it just fine; the
+    // React `<Preview>` primitive appendChild's it into the visible
+    // tree when it mounts.
+    const engineHost =
+      this.ui?.previewHost ??
+      (this.detachedPreviewHost = this.createDetachedPreviewHost());
 
     const engineFactory: PlaybackEngineFactory =
       opts.playbackEngine ?? ((o) => new HtmlVideoEngine(o));
     this.engine = engineFactory({
-      host: this.ui.previewHost,
+      host: engineHost,
       project: this.project,
     });
     // Push initial PiP state to the engine. Engines that don't
@@ -693,7 +766,7 @@ export class Editor implements EditorApi {
     this.engine.setPictureInPictureEnabled?.(this.pictureInPictureEnabled);
     this.engine.onTimeUpdate = (ms) => {
       this.bus.emit("time", { timeMs: ms });
-      this.ui.onTimeTick(ms);
+      this.ui?.onTimeTick(ms);
     };
     this.engine.onEnded = () => this.bus.emit("pause", undefined);
     this.engine.onError = (err) => this.bus.emit("error", { error: err });
@@ -702,7 +775,51 @@ export class Editor implements EditorApi {
       this.handleSourceMetadata(sourceId, durMs);
 
     if (opts.initialTime) this.engine.seek(opts.initialTime);
-    this.ui.render();
+    this.ui?.render();
+  }
+
+  private createDetachedPreviewHost(): HTMLElement {
+    // Mirrors the DOM the built-in EditorUI creates for the preview
+    // slot. Kept detached from document — a React `<Preview>` primitive
+    // will teleport this into the user's slot at mount time.
+    const div = document.createElement("div");
+    div.className = "aicut-preview-host";
+    div.setAttribute("data-testid", "aicut-preview");
+    div.style.position = "relative";
+    div.style.width = "100%";
+    div.style.height = "100%";
+    return div;
+  }
+
+  /**
+   * Preview host element the engine paints into. React / Vue primitives
+   * grab this to teleport it into their own slots via `appendChild`.
+   * In built-in mode this is the EditorUI's preview-host div; in
+   * headless mode it's the detached div created at construction.
+   */
+  get previewHost(): HTMLElement {
+    return this.ui?.previewHost ?? this.detachedPreviewHost!;
+  }
+
+  /**
+   * Apply the editor's theme tokens to any host container. Primitives
+   * use this on their root divs so custom compositions inherit the
+   * same CSS variable set as the built-in shell.
+   */
+  applyThemeTo(el: HTMLElement, theme?: Theme): void {
+    applyTheme(el, theme);
+  }
+
+  /**
+   * Headless entry point — creates an Editor with state + engine but
+   * no built-in DOM. React `<EditorProvider>` and Vue `useAicutEditor`
+   * use this so hosts can compose their own layout out of the exposed
+   * primitives (`<Preview>`, `<Timeline>`, `<PlayButton>`, …).
+   */
+  static createHeadless(opts: HeadlessEditorOptions = {}): Editor {
+    // Cast: the constructor accepts an optional container — passing
+    // `container: undefined` triggers the headless branch.
+    return new Editor(opts as HeadlessEditorOptions & { container?: undefined });
   }
 
   static create(opts: EditorOptions): Editor {
@@ -710,27 +827,39 @@ export class Editor implements EditorApi {
   }
 
   get toolbarLeft(): HTMLElement {
-    return this.ui.toolbarLeft;
+    return this.requireUi("toolbarLeft").toolbarLeft;
   }
 
   get toolbarRight(): HTMLElement {
-    return this.ui.toolbarRight;
+    return this.requireUi("toolbarRight").toolbarRight;
   }
 
   get headerLeft(): HTMLElement {
-    return this.ui.headerLeft;
+    return this.requireUi("headerLeft").headerLeft;
   }
 
   get headerRight(): HTMLElement {
-    return this.ui.headerRight;
+    return this.requireUi("headerRight").headerRight;
   }
 
   get panelLeft(): HTMLElement {
-    return this.ui.panelLeft;
+    return this.requireUi("panelLeft").panelLeft;
   }
 
   get panelRight(): HTMLElement {
-    return this.ui.panelRight;
+    return this.requireUi("panelRight").panelRight;
+  }
+
+  /** Slot-getter guard — the built-in slots only exist when EditorUI
+   *  was mounted. Headless callers should compose their own layout via
+   *  primitives instead of reaching for these DOM handles. */
+  private requireUi(slot: string): EditorUI {
+    if (!this.ui) {
+      throw new Error(
+        `Editor.${slot} is only available in mounted mode. Use React / Vue primitives (<Preview>, <Timeline>, buttons) to compose a headless editor instead.`,
+      );
+    }
+    return this.ui;
   }
 
   // ---- playback -------------------------------------------------------
@@ -738,13 +867,13 @@ export class Editor implements EditorApi {
   play(): void {
     this.engine.play();
     this.bus.emit("play", undefined);
-    this.ui.render();
+    this.ui?.render();
   }
 
   pause(): void {
     this.engine.pause();
     this.bus.emit("pause", undefined);
-    this.ui.render();
+    this.ui?.render();
   }
 
   togglePlay(): void {
@@ -754,7 +883,7 @@ export class Editor implements EditorApi {
 
   seek(timeMs: Ms): void {
     this.engine.seek(timeMs);
-    this.ui.render();
+    this.ui?.render();
   }
 
   getTime(): Ms {
@@ -779,15 +908,15 @@ export class Editor implements EditorApi {
    * but is heavier UX and gets blocked in iframes.
    */
   async enterFullscreen(): Promise<void> {
-    this.ui.setFullscreen(true);
+    this.ui?.setFullscreen(true);
   }
 
   async exitFullscreen(): Promise<void> {
-    this.ui.setFullscreen(false);
+    this.ui?.setFullscreen(false);
   }
 
   isFullscreen(): boolean {
-    return this.ui.isFullscreen();
+    return this.ui?.isFullscreen() ?? false;
   }
 
   // ---- editing --------------------------------------------------------
@@ -1136,9 +1265,9 @@ export class Editor implements EditorApi {
     this.emitHistory();
     // Re-fit on project swap — the new project's duration is likely
     // different so the previous scale is meaningless.
-    this.ui.resetAutoFit();
-    this.ui.setAspect(this.getAspect());
-    this.ui.render();
+    this.ui?.resetAutoFit();
+    this.ui?.setAspect(this.getAspect());
+    this.ui?.render();
   }
 
   getProject(): Project {
@@ -1182,18 +1311,18 @@ export class Editor implements EditorApi {
   }
 
   setTheme(theme: Theme): void {
-    applyTheme(this.container, theme);
+    if (this.container) applyTheme(this.container, theme);
     // The timeline canvas reads CSS vars at paint time and bakes them
     // into pixels — it has no way to know the vars just changed.
     // Without this re-render, the chrome (toolbar/headers) flips
     // immediately via CSS but the canvas keeps its last colours until
     // the next interaction (wheel, click, etc.). Force a repaint now.
-    this.ui.render();
+    this.ui?.render();
   }
 
   setLocale(locale: Partial<Locale>): void {
     this.locale = mergeLocale(locale);
-    this.ui.setLocale(this.locale);
+    this.ui?.setLocale(this.locale);
   }
 
   /** Internal — UI reads the resolved locale here on each render. */
@@ -1216,7 +1345,7 @@ export class Editor implements EditorApi {
     if (next === this.pxPerSec) return;
     this.pxPerSec = next;
     this.bus.emit("scaleChange", { pxPerSec: next });
-    this.ui.render();
+    this.ui?.render();
   }
 
   getSnap(): boolean {
@@ -1227,7 +1356,7 @@ export class Editor implements EditorApi {
     if (snap === this.snap) return;
     this.snap = snap;
     this.bus.emit("snapChange", { snap });
-    this.ui.render();
+    this.ui?.render();
   }
 
   getRulerMinTickPx(): number {
@@ -1238,7 +1367,7 @@ export class Editor implements EditorApi {
     const next = Math.max(20, Math.round(px));
     if (next === this.rulerMinTickPx) return;
     this.rulerMinTickPx = next;
-    this.ui.setRulerMinTickPx(next);
+    this.ui?.setRulerMinTickPx(next);
   }
 
   /** Snap a candidate ms to the nearest snappable surface within SNAP_PX. */
@@ -1287,7 +1416,7 @@ export class Editor implements EditorApi {
       this.selectedKeyframe = null;
       this.bus.emit("keyframeSelectionChange", { target: null });
     }
-    this.ui.render();
+    this.ui?.render();
   }
 
   // ---- keyframes ------------------------------------------------------
@@ -1349,7 +1478,7 @@ export class Editor implements EditorApi {
       this.bus.emit("keyframeSelectionChange", { target: null });
     }
     this.bus.emit("keyframesEnabledChange", { enabled });
-    this.ui.render();
+    this.ui?.render();
   }
 
   isClipEdgeNavEnabled(): boolean {
@@ -1360,7 +1489,7 @@ export class Editor implements EditorApi {
     if (enabled === this.clipEdgeNavEnabled) return;
     this.clipEdgeNavEnabled = enabled;
     this.bus.emit("clipEdgeNavEnabledChange", { enabled });
-    this.ui.render();
+    this.ui?.render();
   }
 
   isPreviewFrameEnabled(): boolean {
@@ -1371,7 +1500,7 @@ export class Editor implements EditorApi {
     if (enabled === this.previewFrameEnabled) return;
     this.previewFrameEnabled = enabled;
     this.bus.emit("previewFrameEnabledChange", { enabled });
-    this.ui.render();
+    this.ui?.render();
   }
 
   isPictureInPictureEnabled(): boolean {
@@ -1390,7 +1519,7 @@ export class Editor implements EditorApi {
     // the next paint tick. Engines that don't ignore the call.
     this.engine.setPictureInPictureEnabled?.(enabled);
     this.bus.emit("pictureInPictureEnabledChange", { enabled });
-    this.ui.render();
+    this.ui?.render();
   }
 
   getPreviewLayout(): PreviewLayout {
@@ -1400,9 +1529,9 @@ export class Editor implements EditorApi {
   setPreviewLayout(layout: PreviewLayout): void {
     if (layout === this.previewLayout) return;
     this.previewLayout = layout;
-    this.ui.setPreviewLayout(layout);
+    this.ui?.setPreviewLayout(layout);
     this.bus.emit("previewLayoutChange", { layout });
-    this.ui.render();
+    this.ui?.render();
   }
 
   isAspectEnabled(): boolean {
@@ -1413,7 +1542,7 @@ export class Editor implements EditorApi {
     if (enabled === this.aspectEnabled) return;
     this.aspectEnabled = enabled;
     this.bus.emit("aspectEnabledChange", { enabled });
-    this.ui.render();
+    this.ui?.render();
   }
 
   getAspect(): AspectRatio | null {
@@ -1442,7 +1571,7 @@ export class Editor implements EditorApi {
       };
     }
     this.afterMutation();
-    this.ui.setAspect(aspect);
+    this.ui?.setAspect(aspect);
     this.bus.emit("aspectChange", { aspect });
   }
 
@@ -1486,7 +1615,7 @@ export class Editor implements EditorApi {
       ...(output.fps != null && output.fps > 0 ? { fps: output.fps } : {}),
     };
     this.afterMutation();
-    this.ui.render();
+    this.ui?.render();
   }
 
   addKeyframe(
@@ -1825,7 +1954,7 @@ export class Editor implements EditorApi {
       this.bus.emit("selectionChange", { clipId: target.clipId });
     }
     this.bus.emit("keyframeSelectionChange", { target });
-    this.ui.render();
+    this.ui?.render();
   }
 
   // ---- history --------------------------------------------------------
@@ -1846,7 +1975,7 @@ export class Editor implements EditorApi {
     this.engine.setProject(this.project);
     this.bus.emit("change", { project: this.getProject() });
     this.emitHistory();
-    this.ui.render();
+    this.ui?.render();
     return true;
   }
 
@@ -1858,7 +1987,7 @@ export class Editor implements EditorApi {
     this.engine.setProject(this.project);
     this.bus.emit("change", { project: this.getProject() });
     this.emitHistory();
-    this.ui.render();
+    this.ui?.render();
     return true;
   }
 
@@ -1932,7 +2061,7 @@ export class Editor implements EditorApi {
     if (this.destroyed) return;
     this.destroyed = true;
     this.engine.destroy();
-    this.ui.destroy();
+    this.ui?.destroy();
     this.bus.clear();
     this.history.clear();
   }
@@ -1987,7 +2116,7 @@ export class Editor implements EditorApi {
   private afterMutation(): void {
     this.engine.setProject(this.project);
     this.bus.emit("change", { project: this.getProject() });
-    this.ui.render();
+    this.ui?.render();
   }
 
   private handleSourceMetadata(sourceId: string, durMs: Ms): void {
@@ -2011,7 +2140,7 @@ export class Editor implements EditorApi {
       // the undo stack with it.
       this.engine.setProject(this.project);
       this.bus.emit("change", { project: this.getProject() });
-      this.ui.render();
+      this.ui?.render();
     }
   }
 }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { App } from "./App.js";
+import { CompositionDemo } from "./CompositionDemo.js";
 import { LightingDemo } from "./LightingDemo.js";
 import { LightingV3Demo } from "./LightingV3Demo.js";
 
@@ -41,7 +42,15 @@ const TABS: TabSpec[] = [
   {
     href: "#/",
     label: "Video editor",
-    isActive: (h) => h === "#/" || h === "" || (!h.startsWith("#/lighting")),
+    isActive: (h) =>
+      h === "#/" ||
+      h === "" ||
+      (!h.startsWith("#/lighting") && !h.startsWith("#/composition")),
+  },
+  {
+    href: "#/composition",
+    label: "Composition (primitives)",
+    isActive: (h: string) => h.startsWith("#/composition"),
   },
   ...(HIDE_LIGHTING
     ? []
@@ -66,6 +75,7 @@ export function Router() {
   // dead route. Local dev keeps both routes live.
   const onLightingV3 = !HIDE_LIGHTING && hash.startsWith("#/lighting-v3");
   const onLightingV2 = !HIDE_LIGHTING && hash === "#/lighting";
+  const onComposition = hash.startsWith("#/composition");
 
   return (
     <div className="demo-root">
@@ -91,6 +101,8 @@ export function Router() {
           <LightingV3Demo />
         ) : onLightingV2 ? (
           <LightingDemo />
+        ) : onComposition ? (
+          <CompositionDemo />
         ) : (
           <App />
         )}
