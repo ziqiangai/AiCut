@@ -19,6 +19,7 @@ import {
   type Project,
   type Theme,
 } from "@aicut/core";
+import { EditorProvider } from "./primitives.js";
 
 export type VideoEditorApi = EditorApi;
 
@@ -219,6 +220,14 @@ export function VideoEditor(props: VideoEditorProps) {
     panelLeft: HTMLElement;
     panelRight: HTMLElement;
   } | null>(null);
+  // Editor state mirror for the primitives-context wrapper below. Kept
+  // as state (not just the ref) so a re-render fires the moment the
+  // mounted editor is ready, letting `<EditorProvider editor={...}>`
+  // adopt it and every primitive dropped into a slot see the same
+  // instance via `useEditor()`.
+  const [editorForProvider, setEditorForProvider] = useState<Editor | null>(
+    null,
+  );
 
   // Latest-callback refs so the effect that creates the editor doesn't
   // re-run on every parent render just because props.onChange is a new
@@ -267,6 +276,7 @@ export function VideoEditor(props: VideoEditorProps) {
         : {}),
     });
     editorRef.current = editor;
+    setEditorForProvider(editor);
     setSlots({
       left: editor.toolbarLeft,
       right: editor.toolbarRight,
@@ -304,6 +314,7 @@ export function VideoEditor(props: VideoEditorProps) {
       editor.destroy();
       editorRef.current = null;
       setSlots(null);
+      setEditorForProvider(null);
     };
     // Editor lifecycle is tied to mount; we deliberately don't list
     // any reactive deps. `theme` changes are pushed through the
@@ -414,7 +425,13 @@ export function VideoEditor(props: VideoEditorProps) {
     [slots],
   );
 
-  return (
+  // Wrap the whole tree in an `<EditorProvider editor={...}>` — the
+  // provider's "adopt" mode reuses the mounted editor instance so any
+  // primitive dropped into a slot (`headerLeft`, `panelRight`, …) can
+  // subscribe to the SAME editor via `useEditor()` / `useEditorState`.
+  // Skipped until the editor is actually created so we don't flash a
+  // null context on the very first render.
+  const tree = (
     <div
       ref={hostRef}
       className={props.className}
@@ -440,5 +457,15 @@ export function VideoEditor(props: VideoEditorProps) {
         ? createPortal(props.panelRight, slots.panelRight)
         : null}
     </div>
+  );
+  // Always wrap in EditorProvider (adopt mode). Passing `editor` — even
+  // when null — puts the provider into "wait for the parent" state
+  // instead of creating a stray headless engine, and keeps the JSX
+  // root stable so React doesn't tear the mounted `<div>` down between
+  // the pre-editor and post-editor renders.
+  return (
+    <EditorProvider editor={editorForProvider ?? undefined}>
+      {tree}
+    </EditorProvider>
   );
 }

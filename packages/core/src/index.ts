@@ -1,6 +1,12 @@
 export { Editor } from "./editor.js";
+// Icon library — SVG strings the editor's toolbar renders. Exported so
+// framework wrappers can share the same visual language in host-built
+// toolbars without re-inventing icons.
+export { ICONS } from "./ui/icons.js";
+export type { IconName } from "./ui/icons.js";
 export type {
   EditorOptions,
+  HeadlessEditorOptions,
   EditorApi,
   EditorEventMap,
   EditorEventName,

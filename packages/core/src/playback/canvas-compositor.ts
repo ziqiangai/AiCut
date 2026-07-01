@@ -104,9 +104,12 @@ export class CanvasCompositorEngine implements PlaybackEngine {
       height: "100%",
       // Stretch with letterboxing handled by the draw loop.
       objectFit: "contain",
-      // Black until the first frame is drawn so the swap from the
-      // previous engine doesn't flash the host background.
-      background: "#000",
+      // Same var the preview-host + demo slots use, so a light-theme
+      // host doesn't end up with a hard black plate around a
+      // letterboxed frame while the surrounding chrome is off-white.
+      // Falls back to black to preserve today's default when no theme
+      // sets the var.
+      background: "var(--aicut-preview-bg, #000)",
     } satisfies Partial<CSSStyleDeclaration>);
     this.mount.appendChild(this.canvas);
 

@@ -435,6 +435,10 @@ export class Timeline {
    *  Editor's `setTheme`. */
   setTheme(theme: Theme): void {
     applyTheme(this.root, theme);
+    // Force a re-paint — the canvas reads CSS vars at draw time and
+    // caches them into pixels, so without this the timeline keeps its
+    // old colours until the next mouse move / scroll / focus interaction.
+    this.scheduleRender();
   }
 
   /** Fit the project's full duration into the current viewport width. */

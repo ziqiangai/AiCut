@@ -2,6 +2,34 @@ export { VideoEditor } from "./VideoEditor.js";
 export type { VideoEditorProps, VideoEditorApi } from "./VideoEditor.js";
 export { Timeline } from "./Timeline.js";
 export type { TimelineProps, TimelineApi } from "./Timeline.js";
+// Primitives — compose your own editor layout instead of using the
+// pre-built <VideoEditor> shell. See "Preview layout" in the README.
+export {
+  EditorProvider,
+  useEditor,
+  useEditorState,
+  useLocale,
+  Preview,
+  Timeline as TimelinePrimitive,
+  PlayButton,
+  TimeLabel,
+  DurationLabel,
+  FullscreenButton,
+  UndoButton,
+  RedoButton,
+  SplitButton,
+  TrimLeftButton,
+  TrimRightButton,
+  SnapToggle,
+  formatClock,
+} from "./primitives.js";
+export type {
+  EditorProviderProps,
+  PreviewProps,
+  TimelinePrimitiveProps,
+  ButtonProps,
+  TimeLabelProps,
+} from "./primitives.js";
 export type {
   Project,
   ProjectOutput,
