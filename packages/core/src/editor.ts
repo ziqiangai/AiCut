@@ -11,6 +11,7 @@ import {
   normalizeProject,
   projectDuration,
   splitClipAt,
+  timelineToSourceMs,
   trackEnd,
 } from "./model.js";
 import {
@@ -44,6 +45,8 @@ import {
   upsertKeyframe,
 } from "./keyframes/index.js";
 import { EditorUI } from "./ui/index.js";
+import { probeMediaSource } from "./media-probe.js";
+import { captureRawFrame, encodeCanvas } from "./frame-capture.js";
 
 /**
  * State-only knobs that ALL editor entry points accept — used by the
@@ -260,6 +263,46 @@ export interface EditorOptions extends HeadlessEditorOptions {
 
 export type PreviewLayout = "fullWidth" | "centered";
 
+/**
+ * Discriminated result for mutating operations. Replaces the mix of
+ * `boolean` / `string[] | null` / `void` returns the earlier API
+ * shipped with, so callers (especially AI tool-loops) get a machine-
+ * readable reason on failure without having to guess from a `false`.
+ *
+ * The `data` field is method-specific — see each `Editor` method's
+ * signature for its exact shape.
+ *
+ * Old signatures are preserved as overloads for now; passing the new
+ * option-object form triggers the `EditResult` branch, positional-arg
+ * calls keep returning `boolean` / `string[] | null` for compat.
+ */
+export type EditResult<T = Record<string, never>> =
+  | { ok: true; data: T }
+  | { ok: false; reason: EditErrorReason; hint?: string };
+
+export type EditErrorReason =
+  /** Referenced clipId doesn't exist in the current project. */
+  | "clip-not-found"
+  /** Referenced trackId doesn't exist. */
+  | "track-not-found"
+  /** Referenced sourceId doesn't exist. */
+  | "source-not-found"
+  /** `timeMs` fell outside the target clip's [start, end). Split needs
+   *  a strictly-interior time. */
+  | "time-outside-clip"
+  /** `timeMs` was negative or NaN / Infinity. */
+  | "invalid-time"
+  /** For moveClip with `onOverlap: "error"` — the destination
+   *  interval overlaps another clip on the target track. */
+  | "overlap"
+  /** Values passed would produce an invalid clip (in >= out, negative
+   *  duration, etc.). */
+  | "invalid-range"
+  /** URL probe failed (couldn't load metadata; likely CORS or 404). */
+  | "source-load-failed"
+  /** Generic fallback for internal invariant violations. */
+  | "internal-error";
+
 export interface EditorEventMap {
   /** Emitted whenever the project mutates. */
   change: { project: Project };
@@ -351,6 +394,128 @@ export interface EditorApi {
   trimRight(timeMs?: Ms): boolean;
   removeClip(clipId: string): boolean;
   setClipSpeed(clipId: string, speed: number): boolean;
+
+  // ── AI-facing editing surface ────────────────────────────────────
+  // The methods above operate against "selection + playhead" implicit
+  // state and return boolean / string[] | null on failure. The methods
+  // below take explicit targets and return `EditResult`, so an AI tool-
+  // loop (or any code without UI state) can drive the editor
+  // deterministically and read a typed reason on failure.
+  //
+  // Legacy signatures above are preserved unchanged. New code /
+  // hosted-by-AI code should prefer these.
+
+  /**
+   * Split a specific clip at a timeline-absolute time. Fails cleanly
+   * if the time falls outside the clip's [start, end) — no more
+   * silent first-match-wins across other tracks.
+   */
+  splitClip(args: {
+    clipId: string;
+    /** Timeline-absolute Ms. Must be strictly inside the target clip. */
+    timeMs: Ms;
+  }): EditResult<{ newClipIds: [string, string] }>;
+
+  /**
+   * Move an existing clip to an explicit destination. Unlike `moveClip`
+   * — which does UI-friendly smart-routing (drops the clip on any
+   * non-overlapping track it can find) — this method commits to the
+   * caller's target and reports `reason: "overlap"` when the slot is
+   * taken. Pass `onOverlap: "auto"` to opt back into smart-routing.
+   */
+  moveClipTo(args: {
+    clipId: string;
+    /** Destination track. Omit to keep clip on its current track. */
+    toTrackId?: string;
+    /** Timeline-absolute start Ms. Omit to keep current start. */
+    startMs?: Ms;
+    /**
+     * - `"error"` (default) — refuse the move; return `overlap` reason.
+     * - `"auto"` — today's `moveClip` smart-routing (fall back to any
+     *   free track of the same kind, else append a fresh one).
+     */
+    onOverlap?: "error" | "auto";
+  }): EditResult<{ clipId: string; trackId: string; startMs: Ms }>;
+
+  /**
+   * Trim one edge of a clip. `edge: "left"` moves `in` (and `start`)
+   * to the given timeline time; `edge: "right"` moves the effective
+   * end. Time must land inside the clip's original playable range.
+   */
+  trimClip(args: {
+    clipId: string;
+    edge: "left" | "right";
+    /** Timeline-absolute Ms of the new edge. */
+    timeMs: Ms;
+  }): EditResult<{ clipId: string }>;
+
+  /** Delete a clip by id. Same as `removeClip` but typed. */
+  deleteClip(args: { clipId: string }): EditResult<{ clipId: string }>;
+
+  /**
+   * One-shot: load a URL as a `MediaSource` (probing duration +
+   * dimensions), create a clip referencing it on the target track at
+   * the target time, and return typed IDs. Async because URL loading
+   * involves an `<video>` metadata probe.
+   *
+   * Skip the probe by passing `sourceId` for an already-added source;
+   * `inMs`/`outMs` still apply against that source's duration.
+   *
+   * `meta` is accepted for forward-compat with generated-content
+   * workflows (recording `generatedBy`, `prompt`, etc.). MVP silently
+   * ignores it — a future release will land the `Clip.meta` field and
+   * start persisting.
+   */
+  addClip(args: {
+    /** Source URL to probe + register. Mutually exclusive with `sourceId`. */
+    sourceUrl?: string;
+    /** Reuse an already-added source. Mutually exclusive with `sourceUrl`. */
+    sourceId?: string;
+    trackId: string;
+    startMs: Ms;
+    /** Trim into source. Defaults to 0. */
+    inMs?: Ms;
+    /** Trim out of source. Defaults to source.duration. */
+    outMs?: Ms;
+    onOverlap?: "error" | "auto";
+    /** Forward-compat only in MVP; silently dropped. */
+    meta?: Record<string, unknown>;
+  }): Promise<EditResult<{ clipId: string; sourceId: string }>>;
+
+  /**
+   * Capture a still frame as a JPEG/PNG blob. Two source modes:
+   *
+   * - `"composite"` (default) — the pixels the user currently sees:
+   *   the compositor canvas after seeking to `timeMs` and waiting one
+   *   frame. Applies keyframe transforms, PiP layering, letterbox.
+   *   Requires an engine that paints to a `<canvas>` (
+   *   `CanvasCompositorEngine` or `WebCodecsEngine`). With
+   *   `HtmlVideoEngine` the returned blob is empty and the reason is
+   *   `internal-error` — fall back to `"raw"`.
+   *
+   * - `"raw"` — the raw source frame at the equivalent source-local
+   *   time of `clipId`. Independent of engine; spawns a hidden
+   *   `<video>` on demand. Pass `clipId` — required. `timeMs` is
+   *   timeline-absolute; the method converts via `timelineToSourceMs`.
+   *
+   * Purpose: give AI tool-loops something to feed a vision model
+   * without setting up the compositor pipeline themselves.
+   */
+  captureFrame(args: {
+    /** Timeline-absolute Ms. */
+    timeMs: Ms;
+    source?: "composite" | "raw";
+    /** Required for `"raw"` mode — which clip's source to read. */
+    clipId?: string;
+    /** `"image/jpeg"` (default; smaller, faster for AI vision) or
+     *  `"image/png"` (larger, lossless). */
+    format?: "image/jpeg" | "image/png";
+    /** JPEG quality [0, 1]. Ignored for PNG. */
+    quality?: number;
+    /** Downscale on the way out — big frames are wasted vision tokens.
+     *  Preserves aspect ratio. */
+    maxWidth?: number;
+  }): Promise<EditResult<{ blob: Blob; width: number; height: number }>>;
   previewMoveTarget(
     clipId: string,
     start: Ms,
@@ -588,6 +753,40 @@ export interface EditorApi {
    */
   beginInteraction(): void;
   endInteraction(): void;
+  /**
+   * Group multiple mutations into a single undo entry + one coalesced
+   * change event. Same underlying mechanism as
+   * `beginInteraction / endInteraction` (this is a friendlier wrapper
+   * with try/finally safety and async support).
+   *
+   * The `label` is currently unused but reserved for future "labeled
+   * history" UI (e.g. surfacing "AI: auto-cut silences" in an
+   * undo-history panel).
+   *
+   * Sync:
+   * ```ts
+   * const result = editor.batch("swap-clips", () => {
+   *   editor.moveClip({ clipId: "a", startMs: 5000 });
+   *   editor.moveClip({ clipId: "b", startMs: 0 });
+   *   return "done";
+   * });
+   * ```
+   *
+   * Async (for AI tool-loops that await external calls):
+   * ```ts
+   * await editor.batch("ai-fill-gap", async () => {
+   *   const { videoUrl } = await klingApi.generate(prompt);
+   *   await editor.addClip({ sourceUrl: videoUrl, trackId, startMs });
+   * });
+   * ```
+   *
+   * If `fn` throws, the interaction still commits its partial changes
+   * (matching how `beginInteraction / endInteraction` behave when
+   * pointerup fires after an exception) — call `editor.undo()` from
+   * the catch block if that's not what you want.
+   */
+  batch<T>(label: string, fn: () => T): T;
+  batch<T>(label: string, fn: () => Promise<T>): Promise<T>;
 
   /**
    * Bookend slot at the very left of the top toolbar — host appends
@@ -1059,6 +1258,363 @@ export class Editor implements EditorApi {
     cl.speed = speed === 1 ? undefined : speed;
     this.afterMutation();
     return true;
+  }
+
+  // ── AI-facing methods (option-object + EditResult) ───────────────
+
+  splitClip(args: {
+    clipId: string;
+    timeMs: Ms;
+  }): EditResult<{ newClipIds: [string, string] }> {
+    if (!Number.isFinite(args.timeMs) || args.timeMs < 0) {
+      return { ok: false, reason: "invalid-time" };
+    }
+    const trk = findTrackOfClip(this.project, args.clipId);
+    const cl = trk?.clips.find((c) => c.id === args.clipId);
+    if (!trk || !cl) return { ok: false, reason: "clip-not-found" };
+    if (args.timeMs <= cl.start || args.timeMs >= clipEnd(cl)) {
+      return {
+        ok: false,
+        reason: "time-outside-clip",
+        hint: `Clip range is [${cl.start}, ${clipEnd(cl)}); need strictly interior time.`,
+      };
+    }
+    const split = splitClipAt(cl, args.timeMs - cl.start);
+    if (!split) return { ok: false, reason: "invalid-range" };
+    this.pushHistory();
+    const [left, right] = split;
+    trk.clips = trk.clips
+      .filter((c) => c.id !== args.clipId)
+      .concat(left, right)
+      .sort((a, b) => a.start - b.start);
+    this.afterMutation();
+    return { ok: true, data: { newClipIds: [left.id, right.id] } };
+  }
+
+  moveClipTo(args: {
+    clipId: string;
+    toTrackId?: string;
+    startMs?: Ms;
+    onOverlap?: "error" | "auto";
+  }): EditResult<{ clipId: string; trackId: string; startMs: Ms }> {
+    const fromTrack = findTrackOfClip(this.project, args.clipId);
+    const clip = fromTrack?.clips.find((c) => c.id === args.clipId);
+    if (!fromTrack || !clip) return { ok: false, reason: "clip-not-found" };
+
+    const nextStart =
+      args.startMs != null ? Math.max(0, args.startMs) : clip.start;
+    if (!Number.isFinite(nextStart)) {
+      return { ok: false, reason: "invalid-time" };
+    }
+    const dur = clipDuration(clip);
+    const nextEnd = nextStart + dur;
+
+    const targetTrack = args.toTrackId
+      ? this.project.tracks.find((t) => t.id === args.toTrackId)
+      : fromTrack;
+    if (!targetTrack) return { ok: false, reason: "track-not-found" };
+
+    // Overlap = any OTHER clip on target track whose interval intersects
+    // [nextStart, nextEnd).
+    const conflict = targetTrack.clips.find((c) => {
+      if (c.id === args.clipId) return false;
+      const cEnd = clipEnd(c);
+      return !(nextEnd <= c.start || nextStart >= cEnd);
+    });
+
+    const onOverlap = args.onOverlap ?? "error";
+    if (conflict && onOverlap === "error") {
+      return {
+        ok: false,
+        reason: "overlap",
+        hint: `Destination [${nextStart}, ${nextEnd}) on track ${targetTrack.id} overlaps clip ${conflict.id}. Pass onOverlap: "auto" to fall back to another track.`,
+      };
+    }
+
+    if (conflict && onOverlap === "auto") {
+      // Delegate to legacy smart-routing — it lands the clip wherever
+      // there's room. Then report where it actually ended up.
+      const ok = this.moveClip(args.clipId, {
+        start: nextStart,
+        ...(args.toTrackId ? { trackId: args.toTrackId } : {}),
+      });
+      if (!ok) return { ok: false, reason: "internal-error" };
+      const landedTrack = findTrackOfClip(this.project, args.clipId);
+      const landedClip = landedTrack?.clips.find((c) => c.id === args.clipId);
+      if (!landedTrack || !landedClip) {
+        return { ok: false, reason: "internal-error" };
+      }
+      return {
+        ok: true,
+        data: {
+          clipId: args.clipId,
+          trackId: landedTrack.id,
+          startMs: landedClip.start,
+        },
+      };
+    }
+
+    // No conflict — commit the exact placement.
+    this.pushHistory();
+    clip.start = nextStart;
+    if (targetTrack.id !== fromTrack.id) {
+      fromTrack.clips = fromTrack.clips.filter((c) => c.id !== args.clipId);
+      targetTrack.clips.push(clip);
+    }
+    targetTrack.clips.sort((a, b) => a.start - b.start);
+    this.afterMutation();
+    return {
+      ok: true,
+      data: { clipId: args.clipId, trackId: targetTrack.id, startMs: nextStart },
+    };
+  }
+
+  trimClip(args: {
+    clipId: string;
+    edge: "left" | "right";
+    timeMs: Ms;
+  }): EditResult<{ clipId: string }> {
+    if (!Number.isFinite(args.timeMs) || args.timeMs < 0) {
+      return { ok: false, reason: "invalid-time" };
+    }
+    const trk = findTrackOfClip(this.project, args.clipId);
+    const cl = trk?.clips.find((c) => c.id === args.clipId);
+    if (!trk || !cl) return { ok: false, reason: "clip-not-found" };
+
+    if (args.edge === "left") {
+      const delta = args.timeMs - cl.start;
+      if (delta <= 0 || delta >= clipDuration(cl)) {
+        return {
+          ok: false,
+          reason: "time-outside-clip",
+          hint: `Trim-left needs time strictly inside (${cl.start}, ${clipEnd(cl)}).`,
+        };
+      }
+      this.pushHistory();
+      cl.in += delta;
+      cl.start += delta;
+      this.afterMutation();
+      return { ok: true, data: { clipId: args.clipId } };
+    }
+
+    // right edge
+    const delta = clipEnd(cl) - args.timeMs;
+    if (delta <= 0 || delta >= clipDuration(cl)) {
+      return {
+        ok: false,
+        reason: "time-outside-clip",
+        hint: `Trim-right needs time strictly inside (${cl.start}, ${clipEnd(cl)}).`,
+      };
+    }
+    this.pushHistory();
+    cl.out -= delta;
+    this.afterMutation();
+    return { ok: true, data: { clipId: args.clipId } };
+  }
+
+  deleteClip(args: { clipId: string }): EditResult<{ clipId: string }> {
+    const trk = findTrackOfClip(this.project, args.clipId);
+    if (!trk) return { ok: false, reason: "clip-not-found" };
+    const ok = this.removeClip(args.clipId);
+    if (!ok) return { ok: false, reason: "internal-error" };
+    return { ok: true, data: { clipId: args.clipId } };
+  }
+
+  async addClip(args: {
+    sourceUrl?: string;
+    sourceId?: string;
+    trackId: string;
+    startMs: Ms;
+    inMs?: Ms;
+    outMs?: Ms;
+    onOverlap?: "error" | "auto";
+    meta?: Record<string, unknown>;
+  }): Promise<EditResult<{ clipId: string; sourceId: string }>> {
+    // `meta` reserved for forward-compat — dropped in MVP.
+    void args.meta;
+
+    if (!args.sourceUrl && !args.sourceId) {
+      return {
+        ok: false,
+        reason: "invalid-range",
+        hint: "Pass either sourceUrl (to load) or sourceId (to reuse).",
+      };
+    }
+    if (!Number.isFinite(args.startMs) || args.startMs < 0) {
+      return { ok: false, reason: "invalid-time" };
+    }
+
+    const target = this.project.tracks.find((t) => t.id === args.trackId);
+    if (!target) return { ok: false, reason: "track-not-found" };
+
+    // Resolve source — reuse existing or load fresh.
+    let source: MediaSource | null = null;
+    let sourceCreated = false;
+    if (args.sourceId) {
+      source =
+        this.project.sources.find((s) => s.id === args.sourceId) ?? null;
+      if (!source) return { ok: false, reason: "source-not-found" };
+    } else if (args.sourceUrl) {
+      let probed: { durationMs: number; width: number; height: number };
+      try {
+        probed = await probeMediaSource(args.sourceUrl);
+      } catch (e) {
+        return {
+          ok: false,
+          reason: "source-load-failed",
+          hint: e instanceof Error ? e.message : String(e),
+        };
+      }
+      source = {
+        id: createId("src"),
+        url: args.sourceUrl,
+        kind: "video",
+        name: args.sourceUrl.split("/").pop() ?? "media",
+        duration: probed.durationMs,
+      };
+      sourceCreated = true;
+    }
+    if (!source) return { ok: false, reason: "internal-error" };
+
+    const inMs = args.inMs ?? 0;
+    const outMs = args.outMs ?? source.duration ?? 0;
+    if (!Number.isFinite(inMs) || !Number.isFinite(outMs) || inMs < 0 || outMs <= inMs) {
+      return {
+        ok: false,
+        reason: "invalid-range",
+        hint: `inMs (${inMs}) must be >= 0 and < outMs (${outMs}).`,
+      };
+    }
+
+    const clipDur = outMs - inMs;
+    const clipStart = args.startMs;
+    const clipEndT = clipStart + clipDur;
+
+    // Overlap check on the destination track.
+    const conflict = target.clips.find((c) => {
+      const cEnd = clipEnd(c);
+      return !(clipEndT <= c.start || clipStart >= cEnd);
+    });
+
+    const onOverlap = args.onOverlap ?? "error";
+    if (conflict && onOverlap === "error") {
+      return {
+        ok: false,
+        reason: "overlap",
+        hint: `Insertion at [${clipStart}, ${clipEndT}) overlaps clip ${conflict.id}. Pass onOverlap: "auto" to append after existing clips.`,
+      };
+    }
+
+    // Fall-back placement for "auto" — append after the last conflicting
+    // clip on the same track. Simple predictable rule; smart routing
+    // across tracks is intentionally NOT applied here (moveClipTo is
+    // where that lives).
+    let finalStart = clipStart;
+    if (conflict && onOverlap === "auto") {
+      const trailingEnd = target.clips.reduce(
+        (acc, c) => Math.max(acc, clipEnd(c)),
+        0,
+      );
+      finalStart = trailingEnd;
+    }
+
+    this.pushHistory();
+    if (sourceCreated) this.project.sources.push(source);
+    const clipId = createId("clip");
+    target.clips.push({
+      id: clipId,
+      sourceId: source.id,
+      in: inMs,
+      out: outMs,
+      start: finalStart,
+    });
+    target.clips.sort((a, b) => a.start - b.start);
+    this.afterMutation();
+
+    return {
+      ok: true,
+      data: { clipId, sourceId: source.id },
+    };
+  }
+
+  async captureFrame(args: {
+    timeMs: Ms;
+    source?: "composite" | "raw";
+    clipId?: string;
+    format?: "image/jpeg" | "image/png";
+    quality?: number;
+    maxWidth?: number;
+  }): Promise<EditResult<{ blob: Blob; width: number; height: number }>> {
+    if (!Number.isFinite(args.timeMs) || args.timeMs < 0) {
+      return { ok: false, reason: "invalid-time" };
+    }
+    const format = args.format ?? "image/jpeg";
+    const quality = args.quality ?? 0.85;
+    const mode = args.source ?? "composite";
+
+    if (mode === "raw") {
+      if (!args.clipId) {
+        return {
+          ok: false,
+          reason: "invalid-range",
+          hint: "raw mode requires clipId to know which source to read.",
+        };
+      }
+      const trk = findTrackOfClip(this.project, args.clipId);
+      const cl = trk?.clips.find((c) => c.id === args.clipId);
+      if (!trk || !cl) return { ok: false, reason: "clip-not-found" };
+      const src = this.project.sources.find((s) => s.id === cl.sourceId);
+      if (!src) return { ok: false, reason: "source-not-found" };
+      const sourceMs = timelineToSourceMs(cl, args.timeMs);
+      try {
+        const out = await captureRawFrame(
+          src.url,
+          sourceMs,
+          args.maxWidth,
+          format,
+          quality,
+        );
+        return { ok: true, data: out };
+      } catch (e) {
+        return {
+          ok: false,
+          reason: "source-load-failed",
+          hint: e instanceof Error ? e.message : String(e),
+        };
+      }
+    }
+
+    // composite
+    const host = this.detachedPreviewHost ?? this.ui?.previewHost;
+    const canvas = host?.querySelector("canvas") as HTMLCanvasElement | null;
+    if (!canvas) {
+      return {
+        ok: false,
+        reason: "internal-error",
+        hint: "No compositor canvas — composite mode needs CanvasCompositorEngine or WebCodecsEngine. Fall back to source: 'raw'.",
+      };
+    }
+    // Seek then wait 2 rAFs so the engine has a chance to paint the
+    // new frame. Falls back to setTimeout in non-DOM harnesses so this
+    // still resolves.
+    this.engine.seek(args.timeMs);
+    await new Promise<void>((r) => {
+      if (typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => requestAnimationFrame(() => r()));
+      } else {
+        setTimeout(r, 16);
+      }
+    });
+    try {
+      const out = await encodeCanvas(canvas, args.maxWidth, format, quality);
+      return { ok: true, data: out };
+    } catch (e) {
+      return {
+        ok: false,
+        reason: "internal-error",
+        hint: e instanceof Error ? e.message : String(e),
+      };
+    }
   }
 
   // ---- tracks ---------------------------------------------------------
@@ -2026,6 +2582,24 @@ export class Editor implements EditorApi {
     if (now === snapshot) return;
     this.history.push(JSON.parse(snapshot) as Project);
     this.emitHistory();
+  }
+
+  batch<T>(_label: string, fn: () => T | Promise<T>): T | Promise<T> {
+    this.beginInteraction();
+    try {
+      const result = fn();
+      if (result instanceof Promise) {
+        // Async — schedule end on settle. Errors still commit the
+        // partial batch (matching begin/endInteraction semantics);
+        // callers who want atomicity call `editor.undo()` in catch.
+        return result.finally(() => this.endInteraction());
+      }
+      this.endInteraction();
+      return result;
+    } catch (e) {
+      this.endInteraction();
+      throw e;
+    }
   }
 
   /**

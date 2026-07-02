@@ -48,6 +48,10 @@ export type {
   PlaybackEngineOptions,
   CanvasCompositorEngineOptions,
   EffectiveTransform,
+  // AI-facing return types + probe metadata.
+  EditResult,
+  EditErrorReason,
+  ProbedMedia,
 } from "@aicut/core";
 export {
   createEmptyProject,
@@ -60,6 +64,18 @@ export {
   htmlVideoEngineFactory,
   CanvasCompositorEngine,
   canvasCompositorEngineFactory,
+  // Pure model helpers — the AI-facing surface. Re-exported so hosts
+  // don't have to depend on @aicut/core directly.
+  findClipContaining,
+  findTrackOfClip,
+  findClipAt,
+  getClipsInRange,
+  getClipsOnTrack,
+  clipDuration,
+  clipEnd,
+  timelineToSourceMs,
+  sourceToTimelineMs,
+  probeMediaSource,
   // Live bindings — re-reading them after `setTimelineMetrics` (which
   // EditorOptions.trackHeight / .rulerHeight calls under the hood)
   // returns the updated values.

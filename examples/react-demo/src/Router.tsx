@@ -3,6 +3,7 @@ import { App } from "./App.js";
 import { CompositionDemo } from "./CompositionDemo.js";
 import { LightingDemo } from "./LightingDemo.js";
 import { LightingV3Demo } from "./LightingV3Demo.js";
+import { ApiPlayground } from "./ApiPlayground.js";
 
 /**
  * Tiny hash-based router — keeps the demo dep-free. Two routes:
@@ -45,12 +46,19 @@ const TABS: TabSpec[] = [
     isActive: (h) =>
       h === "#/" ||
       h === "" ||
-      (!h.startsWith("#/lighting") && !h.startsWith("#/composition")),
+      (!h.startsWith("#/lighting") &&
+        !h.startsWith("#/composition") &&
+        !h.startsWith("#/api")),
   },
   {
     href: "#/composition",
     label: "Composition (primitives)",
     isActive: (h: string) => h.startsWith("#/composition"),
+  },
+  {
+    href: "#/api",
+    label: "API playground 🧪",
+    isActive: (h: string) => h.startsWith("#/api"),
   },
   ...(HIDE_LIGHTING
     ? []
@@ -76,6 +84,7 @@ export function Router() {
   const onLightingV3 = !HIDE_LIGHTING && hash.startsWith("#/lighting-v3");
   const onLightingV2 = !HIDE_LIGHTING && hash === "#/lighting";
   const onComposition = hash.startsWith("#/composition");
+  const onApi = hash.startsWith("#/api");
 
   return (
     <div className="demo-root">
@@ -103,6 +112,8 @@ export function Router() {
           <LightingDemo />
         ) : onComposition ? (
           <CompositionDemo />
+        ) : onApi ? (
+          <ApiPlayground />
         ) : (
           <App />
         )}
