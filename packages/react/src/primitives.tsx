@@ -405,9 +405,9 @@ function runOperationAnimation(
         fromTrackIndex: before.trackIndex,
         toStartMs: after.startMs,
         toTrackIndex: after.trackIndex,
-        // Deliberately slow (testing phase). Real product default should
-        // land around 280-320ms — halve back before ship.
-        durationMs: 560,
+        // Demo-friendly duration so the slide reads clearly during
+        // walkthroughs. Ship at ~280ms.
+        durationMs: 820,
       });
       return;
     }
@@ -428,9 +428,11 @@ function runOperationAnimation(
           newIds[1],
           args.timeMs,
           location.trackIndex,
-          // Testing-phase durations; ship at durationMs ~260ms and
-          // peakGapPx ~7 once the shape is locked.
-          { durationMs: 520, peakGapPx: 14 },
+          // Demo-friendly duration + a slightly wider peak gap so the
+          // cleave is clearly visible during walkthroughs. Ship at
+          // durationMs ~260ms and peakGapPx ~7 once the shape is
+          // locked.
+          { durationMs: 780, peakGapPx: 16 },
         );
       } else {
         timeline.flashCut(location.trackIndex, args.timeMs, 420);
