@@ -51,15 +51,32 @@ export interface AiCutEffectsProps {
   zIndex?: number;
 }
 
+/**
+ * Default handlers per op kind. All `false` in the current build —
+ * the professional in-canvas animations wired directly on the
+ * `<Timeline>` primitive (`animateClip` / `flashCut`) now handle
+ * the primary feedback, and stacking a mascot overlay on top of that
+ * would be double-drawing the same event.
+ *
+ * The `defaultSplitEffect` (chop bear) and `defaultMoveEffect`
+ * (carry bear) are still exported for hosts that explicitly want
+ * the playful vibe — opt in via
+ *
+ *   import { AiCutEffects, defaultSplitEffect, defaultMoveEffect } from "@aicut/effects";
+ *   <AiCutEffects effects={{
+ *     splitClip: defaultSplitEffect,
+ *     moveClipTo: defaultMoveEffect,
+ *   }} />
+ *
+ * A custom handler always wins over the default, so a host can also
+ * pass its own overlay per kind without touching this map.
+ */
 const DEFAULT_EFFECTS: Record<
   OperationEvent["kind"],
   EffectHandler | false
 > = {
-  splitClip: defaultSplitEffect,
-  moveClipTo: defaultMoveEffect,
-  // Trim / delete / add ship without a default in the first pass —
-  // they render nothing unless a host passes a custom handler. Keeps
-  // the shipped surface honest (2 real animations > 5 empty stubs).
+  splitClip: false,
+  moveClipTo: false,
   trimClip: false,
   deleteClip: false,
   addClip: false,
