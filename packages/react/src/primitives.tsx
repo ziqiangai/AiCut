@@ -244,9 +244,41 @@ export function useEditorState<T>(
   selectorRef.current = selector;
   const eventsKey = events.join(",");
 
+  // Snapshot cache. React 19's `useSyncExternalStore` calls
+  // `getSnapshot` on every render. The naive version
+  // `() => selector(editor)` runs the selector fresh each call and
+  // returns a NEW reference whenever the selector produces a fresh
+  // object (e.g. `e => e.getProject()` → `JSON.parse` clone). React
+  // sees the snapshot always changing → panics with
+  //   "The result of getSnapshot should be cached to avoid an
+  //    infinite loop"
+  // and can enter a runaway rerender cycle.
+  //
+  // Fix: cache the snapshot in a ref, invalidate ONLY when a
+  // subscribed editor event actually fires. During render, return
+  // the stable cached reference. This preserves the intended
+  // semantics — the component only re-renders on real state changes,
+  // and selectors that build fresh objects are safe.
+  interface Cache {
+    hasValue: boolean;
+    value: T;
+    editor: EditorApi;
+  }
+  const cacheRef = useRef<Cache>({
+    hasValue: false,
+    value: undefined as unknown as T,
+    editor,
+  });
+
   const subscribe = useCallback(
     (onChange: () => void) => {
-      const offs = events.map((ev) => editor.on(ev, () => onChange()));
+      const invalidateAndNotify = (): void => {
+        // Mark stale so the next getSnapshot recomputes; then tell
+        // React to re-render (which reads getSnapshot).
+        cacheRef.current.hasValue = false;
+        onChange();
+      };
+      const offs = events.map((ev) => editor.on(ev, invalidateAndNotify));
       return () => {
         for (const off of offs) off();
       };
@@ -255,10 +287,18 @@ export function useEditorState<T>(
     [editor, eventsKey],
   );
 
-  const getSnapshot = useCallback(
-    () => selectorRef.current(editor),
-    [editor],
-  );
+  const getSnapshot = useCallback((): T => {
+    const cache = cacheRef.current;
+    // Adopt-mode: parent handed us a new editor. Old snapshot is
+    // meaningless — invalidate.
+    if (cache.editor !== editor) cache.hasValue = false;
+    if (!cache.hasValue) {
+      cache.value = selectorRef.current(editor);
+      cache.hasValue = true;
+      cache.editor = editor;
+    }
+    return cache.value;
+  }, [editor]);
 
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
