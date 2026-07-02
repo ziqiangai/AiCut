@@ -36,6 +36,7 @@ import {
   type IconName,
   type Locale,
   type Ms,
+  type OperationEvent,
   type Project,
   type Theme,
 } from "@aicut/core";
@@ -364,6 +365,104 @@ export interface TimelinePrimitiveProps {
 }
 
 /**
+ * Bridge from structured `OperationEvent`s to the CoreTimeline's
+ * animation primitives. Called on every operation the editor commits.
+ *
+ * Only the ops with a meaningful in-canvas animation are handled:
+ *
+ *   moveClipTo → `timeline.animateClip(...)` so the clip visually
+ *                slides from its pre-mutation (start, trackIndex) to
+ *                its post-mutation position over ~320ms. The data
+ *                model already reflects the destination; this is a
+ *                pure render-time tween.
+ *
+ *   splitClip  → `timeline.flashCut(...)` at the cut point on the
+ *                original clip's track. Reads as "a cut just happened
+ *                here" with a bright vertical flash.
+ *
+ * Failed ops (`result.ok === false`) are silently ignored — nothing to
+ * animate for a rejected edit.
+ */
+function runOperationAnimation(
+  timeline: CoreTimeline,
+  op: OperationEvent,
+): void {
+  if (!op.result.ok) return;
+  switch (op.kind) {
+    case "moveClipTo": {
+      const args = op.args as { clipId: string };
+      const before = findClipLocation(op.beforeProject, args.clipId);
+      const after = findClipLocation(op.afterProject, args.clipId);
+      if (!before || !after) return;
+      if (
+        before.startMs === after.startMs &&
+        before.trackIndex === after.trackIndex
+      ) {
+        return;
+      }
+      timeline.animateClip(args.clipId, {
+        fromStartMs: before.startMs,
+        fromTrackIndex: before.trackIndex,
+        toStartMs: after.startMs,
+        toTrackIndex: after.trackIndex,
+        // Demo-friendly duration so the slide reads clearly during
+        // walkthroughs. Ship at ~280ms.
+        durationMs: 820,
+      });
+      return;
+    }
+    case "splitClip": {
+      const args = op.args as { clipId: string; timeMs: number };
+      const location = findClipLocation(op.beforeProject, args.clipId);
+      if (!location) return;
+      // op.result.data.newClipIds is [leftId, rightId] for a successful
+      // split — that's what animateSplit needs to pull the two halves
+      // apart at the cut point. Fall back to the older flashCut-only
+      // path if for any reason we can't extract them (defensive; the
+      // core always returns them on ok=true).
+      const newIds = (op.result.data as { newClipIds?: [string, string] })
+        ?.newClipIds;
+      if (newIds && newIds.length === 2) {
+        timeline.animateSplit(
+          newIds[0],
+          newIds[1],
+          args.timeMs,
+          location.trackIndex,
+          // Demo-friendly duration + a slightly wider peak gap so the
+          // cleave is clearly visible during walkthroughs. Ship at
+          // durationMs ~260ms and peakGapPx ~7 once the shape is
+          // locked.
+          { durationMs: 780, peakGapPx: 16 },
+        );
+      } else {
+        timeline.flashCut(location.trackIndex, args.timeMs, 420);
+      }
+      return;
+    }
+    default:
+      return;
+  }
+}
+
+/**
+ * Locate a clip in a `Project` snapshot by id, returning its data
+ * position. Used to compute the `from` / `to` endpoints of an AI-op
+ * animation from the operation event's before / after project.
+ */
+function findClipLocation(
+  project: Project,
+  clipId: string,
+): { trackIndex: number; startMs: number } | null {
+  for (let ti = 0; ti < project.tracks.length; ti++) {
+    const t = project.tracks[ti];
+    if (!t) continue;
+    const c = t.clips.find((x) => x.id === clipId);
+    if (c) return { trackIndex: ti, startMs: c.start };
+  }
+  return null;
+}
+
+/**
  * Timeline primitive — spins up a `CoreTimeline` bound to the shared
  * editor's project, wires the standard callbacks so drags / scrubs /
  * splits propagate back through the API. Different from the standalone
@@ -417,6 +516,12 @@ export function Timeline({
       editor.on("keyframesEnabledChange", ({ enabled }) =>
         timeline.setKeyframeState({ enabled }),
       ),
+      // AI-op animation bridge — turn structured `operation` events
+      // into per-clip render tweens / flashes on the timeline canvas.
+      // This is what makes AI-driven edits look "professional": the
+      // clip actually slides instead of teleporting-and-getting-chased
+      // by an overlay mascot, and splits get an in-canvas flash cue.
+      editor.on("operation", (op) => runOperationAnimation(timeline, op)),
     ];
 
     return () => {

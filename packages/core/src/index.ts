@@ -1,4 +1,14 @@
 export { Editor } from "./editor.js";
+export type {
+  EditResult,
+  EditErrorReason,
+  OperationEvent,
+} from "./editor.js";
+// Standalone metadata probe — same helper `Editor.addClip({ sourceUrl })`
+// uses internally. Hosts can call it directly to pre-fetch duration
+// + dimensions before deciding whether to insert.
+export { probeMediaSource } from "./media-probe.js";
+export type { ProbedMedia } from "./media-probe.js";
 // Icon library — SVG strings the editor's toolbar renders. Exported so
 // framework wrappers can share the same visual language in host-built
 // toolbars without re-inventing icons.
@@ -37,7 +47,21 @@ export {
   getTransformAtTimelineTime,
   type EffectiveTransform,
 } from "./keyframes/index.js";
-export { createEmptyProject, normalizeProject } from "./model.js";
+export {
+  createEmptyProject,
+  normalizeProject,
+  findClipContaining,
+  findTrackOfClip,
+  findClipAt,
+  getClipsInRange,
+  getClipsOnTrack,
+  clipDuration,
+  clipEnd,
+  // Time conversion — clip.start/clip.in do the math, but these
+  // helpers save AI callers from re-deriving it every tool call.
+  timelineToSourceMs,
+  sourceToTimelineMs,
+} from "./model.js";
 export { createId } from "./ids.js";
 
 // Standalone canvas Timeline. Reuse this without the rest of the editor

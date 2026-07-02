@@ -808,3 +808,242 @@ body,
   padding: 2px 8px;
   font-size: 11px;
 }
+
+/* ================================================================
+ * API playground — cards on the left, live preview + timeline right.
+ * Purpose: dogfood the new AI-facing API surface before wiring an
+ * LLM. Each card = one method, form + Run button + response log.
+ * ================================================================ */
+
+.apiplay-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
+  background: var(--aicut-controls-bg, #1f1f22);
+  color: var(--aicut-controls-text, rgba(255, 255, 255, 0.85));
+}
+.apiplay-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--aicut-controls-border);
+  font-size: 13px;
+}
+.apiplay-hint {
+  opacity: 0.65;
+  font-size: 12px;
+}
+.apiplay-body {
+  display: grid;
+  grid-template-columns: 420px minmax(0, 1fr);
+  min-height: 0;
+}
+.apiplay-cards {
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-right: 1px solid var(--aicut-controls-border);
+}
+.apiplay-preview {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+  padding: 12px;
+  gap: 8px;
+}
+.apiplay-preview-video {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--aicut-controls-border);
+}
+
+.apiplay-card {
+  background: var(--aicut-controls-hover, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--aicut-controls-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.apiplay-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.apiplay-card-title {
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+.apiplay-card-tag {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 10px;
+  opacity: 0.55;
+  font-family: ui-monospace, "SF Mono", monospace;
+}
+.apiplay-card-desc {
+  font-size: 11px;
+  opacity: 0.65;
+  line-height: 1.4;
+}
+.apiplay-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.apiplay-field {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.apiplay-field-label {
+  opacity: 0.7;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 11px;
+}
+.apiplay-field input,
+.apiplay-field select {
+  width: 100%;
+  padding: 4px 6px;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 12px;
+  color: var(--aicut-controls-text);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--aicut-controls-border);
+  border-radius: 4px;
+}
+
+.apiplay-run-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.apiplay-run-btn {
+  padding: 4px 14px;
+  background: var(--color-brand, #9a31f4);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.apiplay-run-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+.apiplay-secondary {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--aicut-controls-border);
+  color: var(--aicut-controls-text);
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.apiplay-secondary:hover {
+  background: var(--aicut-controls-active);
+}
+
+.apiplay-status {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.apiplay-status.ok {
+  background: rgba(50, 200, 100, 0.2);
+  color: rgb(120, 240, 170);
+}
+.apiplay-status.err {
+  background: rgba(220, 60, 60, 0.2);
+  color: rgb(255, 150, 150);
+}
+.apiplay-result {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 10px;
+  line-height: 1.35;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.apiplay-thumb {
+  border-radius: 4px;
+  margin-top: 6px;
+  border: 1px solid var(--aicut-controls-border);
+}
+
+.apiplay-snapshot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+.apiplay-track-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.apiplay-track-label {
+  min-width: 90px;
+  font-family: ui-monospace, "SF Mono", monospace;
+  opacity: 0.6;
+}
+.apiplay-track-clips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.apiplay-clip-chip {
+  padding: 2px 8px;
+  font-family: ui-monospace, "SF Mono", monospace;
+  font-size: 10px;
+  background: rgba(154, 49, 244, 0.15);
+  border: 1px solid rgba(154, 49, 244, 0.4);
+  border-radius: 4px;
+  color: var(--aicut-controls-text);
+  cursor: pointer;
+}
+.apiplay-clip-chip:hover {
+  background: rgba(154, 49, 244, 0.25);
+}
+.apiplay-empty {
+  font-size: 11px;
+  opacity: 0.4;
+}
+
+/* Effects toggle chip in the API playground header. */
+.apiplay-chip {
+  margin-left: auto;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--aicut-controls-border);
+  background: var(--aicut-controls-hover);
+  color: var(--aicut-controls-text);
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: ui-monospace, "SF Mono", monospace;
+}
+.apiplay-chip:hover {
+  background: var(--aicut-controls-active);
+}

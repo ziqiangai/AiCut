@@ -128,6 +128,77 @@ export function findTrackOfClip(
   return null;
 }
 
+// ── Query helpers ──────────────────────────────────────────────────
+// Pure functions on a Project snapshot. Meant for tool-loops / AI
+// callers that get a project from `editor.getProject()` and want to
+// answer "what's at time X on track Y" without scanning the JSON
+// themselves. All return references into the passed project, do NOT
+// mutate.
+
+/**
+ * First clip on any track that contains `timeMs` (inclusive start,
+ * exclusive end). Pass `trackIndex` to restrict to a single track;
+ * omit to scan tracks top-down and return the first match.
+ * Returns `null` if no clip matches.
+ */
+export function findClipAt(
+  project: Project,
+  timeMs: Ms,
+  trackIndex?: number,
+): { track: Track; clip: Clip } | null {
+  if (trackIndex != null) {
+    const t = project.tracks[trackIndex];
+    if (!t) return null;
+    const c = findClipContaining(t, timeMs);
+    return c ? { track: t, clip: c } : null;
+  }
+  for (const t of project.tracks) {
+    const c = findClipContaining(t, timeMs);
+    if (c) return { track: t, clip: c };
+  }
+  return null;
+}
+
+/**
+ * All clips whose playable interval overlaps `[startMs, endMs)`. Half-
+ * open range matches `findClipContaining`. Order preserved (per-track,
+ * left-to-right). Pass `trackIndex` to restrict to a single track.
+ */
+export function getClipsInRange(
+  project: Project,
+  startMs: Ms,
+  endMs: Ms,
+  trackIndex?: number,
+): Array<{ trackIndex: number; track: Track; clip: Clip }> {
+  const out: Array<{ trackIndex: number; track: Track; clip: Clip }> = [];
+  const tracks =
+    trackIndex != null
+      ? project.tracks[trackIndex]
+        ? [{ i: trackIndex, t: project.tracks[trackIndex]! }]
+        : []
+      : project.tracks.map((t, i) => ({ i, t }));
+  for (const { i, t } of tracks) {
+    for (const c of t.clips) {
+      const cStart = c.start;
+      const cEnd = clipEnd(c);
+      if (!(cEnd <= startMs || cStart >= endMs)) {
+        out.push({ trackIndex: i, track: t, clip: c });
+      }
+    }
+  }
+  return out;
+}
+
+/** All clips on a specific track, in timeline order. Empty if index
+ *  is out of range. */
+export function getClipsOnTrack(project: Project, trackIndex: number): Clip[] {
+  const t = project.tracks[trackIndex];
+  if (!t) return [];
+  // Returns a shallow copy so callers can't accidentally mutate the
+  // track's internal ordering.
+  return t.clips.slice();
+}
+
 /**
  * Defensive normalization — ensures clips on each track are sorted by
  * `start`, IDs exist, and trivially-empty clips (out <= in) are dropped.
@@ -324,9 +395,32 @@ export function splitClipAt(clip: Clip, localOffset: Ms): [Clip, Clip] | null {
   return [left, right];
 }
 
-/** Alias retained for back-compat with existing call sites. */
-export function findClipAt(track: Track, timeMs: Ms): Clip | null {
-  return findClipContaining(track, timeMs);
+// ── Timeline ↔ source time conversion ────────────────────────────
+// A `Clip` has:
+//   - `clip.start`     — timeline-absolute Ms where the clip begins
+//   - `clip.in`        — Ms into the source where playback starts
+//   - `clip.out`       — Ms into the source where playback ends
+// So local (source) time = clip.in + (timelineTime - clip.start).
+// Speed multiplier compresses the mapping but for MVP we treat clips
+// as 1× — matches how `clipDuration()` handles missing `speed`.
+
+/** Convert a timeline-absolute Ms into the source-local Ms of the
+ *  given clip. Result is clamped to `[clip.in, clip.out]`. */
+export function timelineToSourceMs(clip: Clip, timelineMs: Ms): Ms {
+  const raw = clip.in + (timelineMs - clip.start);
+  if (raw < clip.in) return clip.in;
+  if (raw > clip.out) return clip.out;
+  return raw;
+}
+
+/** Inverse of `timelineToSourceMs`. Result clamped to
+ *  `[clip.start, clip.start + duration]`. */
+export function sourceToTimelineMs(clip: Clip, sourceMs: Ms): Ms {
+  const raw = clip.start + (sourceMs - clip.in);
+  if (raw < clip.start) return clip.start;
+  const end = clipEnd(clip);
+  if (raw > end) return end;
+  return raw;
 }
 
 export function projectDuration(project: Project): Ms {

@@ -95,6 +95,51 @@ export interface DrawState {
     ghostTrackIndex: number;
     wouldOverlap: boolean;
   } | null;
+  /**
+   * Per-clip render-time position overrides — used by the "AI operation
+   * animation" system to render a clip at a smoothly-interpolated
+   * (start, trackIndex) while its actual data is at the final position.
+   * When a clip id appears here, `drawTrackRow` draws it at these
+   * values instead of `clip.start` / its own track index. Values can be
+   * fractional (in particular `trackIndex` is a float during
+   * cross-track moves, so the clip physically slides between rows).
+   *
+   * `startPxOffset` is an optional pixel-space nudge added to the
+   * computed startX AFTER pxPerSec conversion. It exists for effects
+   * that want to operate in screen pixels regardless of zoom — most
+   * notably the split effect, which opens a temporary gap between the
+   * two new halves that should stay a constant pixel width no matter
+   * what the current scale is. When absent the offset is 0.
+   */
+  clipPositionOverrides?: ReadonlyMap<
+    string,
+    {
+      /** When present, replaces `clip.start` for rendering. Otherwise
+       *  `clip.start` is used. */
+      startMs?: number;
+      /** When present, replaces the host track's index for rendering.
+       *  Fractional values slide the clip between rows. */
+      trackIndex?: number;
+      /** Pixel-space nudge added to the computed startX after
+       *  pxPerSec conversion. Used by the split effect to open a
+       *  constant-pixel gap regardless of zoom. */
+      startPxOffset?: number;
+    }
+  > | null;
+  /**
+   * Active flash overlays — bright vertical lines painted on top of
+   * clips at (trackIndex, atMs) to signal "something discrete just
+   * happened here" (typically a split cut). Alpha is pre-computed by
+   * the caller so drawing is stateless.
+   */
+  flashes?: ReadonlyArray<{
+    trackIndex: number;
+    atMs: number;
+    /** 0–1 core-line opacity for this frame. */
+    alpha: number;
+    /** 0–1 glow intensity for this frame (drives shadowBlur). */
+    glow: number;
+  }> | null;
 }
 
 /**
@@ -132,6 +177,7 @@ export function drawAll(
   ctx.clip();
   ctx.translate(0, -state.scrollTop);
   drawTracks(ctx, state, style, thumbs);
+  drawFlashes(ctx, state);
   if (state.isDragging) {
     drawPhantomRow(ctx, state.project.tracks.length, baseX, state, style);
   }
@@ -510,18 +556,62 @@ function drawTrackRow(
 
   for (const clip of track.clips) {
     const dim = state.dragGhost?.clipId === clip.id;
+    // Consult the AI-op animation overrides. When present, the clip
+    // renders at the tweened (startMs, trackIndex) — possibly at a
+    // fractional trackIndex which slides it between rows.
+    const override = state.clipPositionOverrides?.get(clip.id);
+    const renderStartMs = override?.startMs ?? clip.start;
+    const renderTrackIndex = override?.trackIndex ?? trackIndex;
+    const renderStartPxOffset = override?.startPxOffset ?? 0;
     drawClipAt(
       ctx,
       clip,
-      trackIndex,
-      clip.start,
+      renderTrackIndex,
+      renderStartMs,
       sources,
       state,
       style,
       thumbs,
       dim,
       false,
+      renderStartPxOffset,
     );
+  }
+}
+
+/**
+ * Paint the active operation-flash overlays (typically split cuts).
+ * Each flash is a bright vertical line at (trackIndex, atMs) drawn on
+ * top of the clip body, with a soft outward glow. Alpha values are
+ * pre-computed by the caller — this function is stateless.
+ */
+function drawFlashes(
+  ctx: CanvasRenderingContext2D,
+  state: DrawState,
+): void {
+  if (!state.flashes || state.flashes.length === 0) return;
+  const baseX = contentLeftX(state.showHeader);
+  for (const f of state.flashes) {
+    const x = baseX + (f.atMs / 1000) * state.pxPerSec - state.scrollLeft;
+    if (x < baseX - 20 || x > state.viewportWidth + 20) continue;
+    const y = trackY(f.trackIndex) + CLIP_INSET;
+    const h = TRACK_HEIGHT - CLIP_INSET * 2;
+    ctx.save();
+    // Wide soft halo — a horizontal gradient centred on the cut, so
+    // clips on either side pick up a subtle brightening.
+    const halo = ctx.createLinearGradient(x - 18, 0, x + 18, 0);
+    halo.addColorStop(0, "rgba(255, 255, 255, 0)");
+    halo.addColorStop(0.5, `rgba(255, 255, 255, ${0.35 * f.alpha})`);
+    halo.addColorStop(1, "rgba(255, 255, 255, 0)");
+    ctx.fillStyle = halo;
+    ctx.fillRect(x - 18, y, 36, h);
+    // Sharp core line with a canvas shadow for the glow. Kept ≤2px so
+    // the cut reads as precise, not smeary.
+    ctx.shadowColor = "rgba(255, 255, 255, 0.95)";
+    ctx.shadowBlur = 10 * f.glow;
+    ctx.fillStyle = `rgba(255, 255, 255, ${f.alpha})`;
+    ctx.fillRect(x - 1, y, 2, h);
+    ctx.restore();
   }
 }
 
@@ -549,10 +639,15 @@ function drawClipAt(
   thumbs: ThumbnailRibbon,
   dim: boolean,
   warn: boolean,
+  /** Optional pixel-space nudge applied after pxPerSec conversion. Used
+   *  by the split animation to open a gap between the two new halves
+   *  without depending on the current zoom level. */
+  startPxOffset = 0,
 ): void {
   const { pxPerSec, scrollLeft } = state;
   const baseX = contentLeftX(state.showHeader);
-  const startX = baseX + (startMs / 1000) * pxPerSec - scrollLeft;
+  const startX =
+    baseX + (startMs / 1000) * pxPerSec - scrollLeft + startPxOffset;
   const widthPx = Math.max(2, ((clip.out - clip.in) / 1000) * pxPerSec);
   const y = trackY(trackIndex) + CLIP_INSET;
   const h = TRACK_HEIGHT - CLIP_INSET * 2;

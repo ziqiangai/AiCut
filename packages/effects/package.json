@@ -1,0 +1,63 @@
+{
+  "name": "@aicut/effects",
+  "version": "0.7.5",
+  "description": "Optional visual-effects layer for @aicut/react — animated stick figures / characters that visualise every AI-facing edit operation as it fires. Fully opt-in, host-swappable.",
+  "license": "MIT",
+  "author": "ziqiang <ziqiangytu@gmail.com>",
+  "homepage": "https://github.com/ziqiangai/AiCut#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ziqiangai/AiCut.git",
+    "directory": "packages/effects"
+  },
+  "bugs": {
+    "url": "https://github.com/ziqiangai/AiCut/issues"
+  },
+  "keywords": [
+    "video-editor",
+    "aicut",
+    "animation",
+    "effects",
+    "mascot"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@aicut/core": "workspace:*",
+    "@aicut/react": "workspace:*",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@aicut/core": "workspace:*",
+    "@aicut/react": "workspace:*",
+    "@types/react": "^19.0.1",
+    "@types/react-dom": "^19.0.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
